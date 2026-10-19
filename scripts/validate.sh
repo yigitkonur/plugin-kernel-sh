@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# validate.sh -- structural checks for the plugin repo. Exit 1 on any failure.
+#  1 claude plugin validate --strict (marketplace, plugin, skills) when `claude` is installed
+#  2 every .json parses
+#  3 SKILL.md frontmatter is valid YAML (python3+pyyaml if present, else a plain-scalar heuristic)
+#  4 every references/ or scripts/ path named in a SKILL.md, and every ${CLAUDE_PLUGIN_ROOT}/ path named in
+#    hooks.json, SKILL.md or README, exists  (a line containing "novalidate" is skipped)
+#  5 size limits: SKILL.md <= 300 lines, references <= 350 lines, description <= 600 chars
+#  6 VERSION == plugin.json == marketplace.json (metadata and plugin entry)
+set -u; shopt -s nullglob
+cd "$(git rev-parse --show-toplevel)" || exit 2
+P=plugins/kernel; fail=0
+bad() { echo "validate: $*" >&2; fail=1; }
+
+# 1
+if command -v claude >/dev/null 2>&1; then
+  for t in . "$P" "$P/skills"; do claude plugin validate "$t" --strict >/dev/null 2>&1 || { bad "claude plugin validate --strict failed on $t"; claude plugin validate "$t" --strict 2>&1 | sed 's/^/  /' >&2; }; done
+else echo "validate: claude not installed, skipping claude plugin validate" >&2; fi
+
+# 2
+while IFS= read -r f; do jq -e . "$f" >/dev/null 2>&1 || bad "invalid JSON: $f"; done < <(git ls-files -co --exclude-standard '*.json')
+
+# 3
+for f in "$P"/skills/*/SKILL.md; do
+  fm="$(awk 'NR==1&&$0!="---"{exit} NR>1&&$0=="---"{exit} NR>1{print}' "$f")"
+  [ -z "$fm" ] && { bad "no frontmatter: $f"; continue; }
+  if python3 -c 'import yaml' 2>/dev/null; then
+    printf '%s\n' "$fm" | python3 -I -c 'import sys,yaml; d=yaml.safe_load(sys.stdin); assert isinstance(d,dict) and isinstance(d.get("name"),str) and isinstance(d.get("description"),str)' 2>/dev/null || bad "frontmatter is not valid YAML with string name+description: $f"
+  else
+    printf '%s\n' "$fm" | grep -E '^(description|argument-hint):[[:space:]]+[^>"|[:space:]].*: ' >/dev/null && bad "plain scalar containing ': ' in $f (use >- or quotes)"
+    printf '%s\n' "$fm" | grep -E '^argument-hint:[[:space:]]+\[' >/dev/null && bad "unquoted [..] argument-hint in $f"
+  fi
+  name="$(printf '%s\n' "$fm" | sed -n 's/^name:[[:space:]]*//p' | head -1)"; [ "$name" = "$(basename "$(dirname "$f")")" ] || bad "name '$name' != directory: $f"
+  dlen="$(printf '%s\n' "$fm" | awk '/^description:/{d=1; sub(/^description:[[:space:]]*(>-|>|\|)?[[:space:]]*/,""); s=$0; next} d&&/^[[:space:]]/{s=s " " $0; next} d{d=0} END{print length(s)}')"
+  [ "${dlen:-0}" -le 600 ] || bad "description is $dlen chars (>600): $f"
+  [ "$(wc -l < "$f")" -le 300 ] || bad "SKILL.md over 300 lines: $f"
+done
+for f in "$P"/skills/*/references/*.md; do [ -f "$f" ] && [ "$(wc -l < "$f")" -gt 350 ] && bad "reference over 350 lines: $f"; done
+
+# 4
+check_paths() { # file base-dir-for-relative-refs
+  local f="$1" base="$2" p
+  while IFS= read -r p; do
+    [ -e "$base/$p" ] || bad "$f names missing path: $p"
+  done < <(grep -v 'novalidate' "$f" | grep -oE '(^|[^A-Za-z0-9_./-])(references|scripts)/[A-Za-z0-9._/-]*[A-Za-z0-9_]\.(md|sh|ts|tsv|json|mjs)' | sed -E 's/^[^rs]*//' | sort -u)
+}
+for f in "$P"/skills/*/SKILL.md; do check_paths "$f" "$(dirname "$f")"; done
+for f in "$P"/skills/*/references/*.md; do check_paths "$f" "$(dirname "$(dirname "$f")")"; done
+for f in "$P/hooks/hooks.json" "$P"/skills/*/SKILL.md "$P"/skills/*/references/*.md README.md "$P/README.md"; do
+  [ -f "$f" ] || continue
+  while IFS= read -r p; do
+    [ -e "$P/$p" ] || bad "$f names missing plugin path: \${CLAUDE_PLUGIN_ROOT}/$p"
+  done < <(grep -v 'novalidate' "$f" | grep -oE '\$\{CLAUDE_PLUGIN_ROOT\}/[A-Za-z0-9._/-]*[A-Za-z0-9_]' | sed 's#^\${CLAUDE_PLUGIN_ROOT}/##' | sort -u)
+done
+
+# 6
+V="$(tr -d '[:space:]' < VERSION)"
+[ "$(jq -r .version "$P/.claude-plugin/plugin.json")" = "$V" ] || bad "plugin.json version != VERSION ($V)"
+[ "$(jq -r '.metadata.version' .claude-plugin/marketplace.json)" = "$V" ] || bad "marketplace metadata.version != VERSION ($V)"
+[ "$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)" = "$V" ] || bad "marketplace plugin entry version != VERSION ($V)"
+
+[ $fail = 0 ] && echo "validate: OK"
+exit $fail

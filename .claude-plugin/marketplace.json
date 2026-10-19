@@ -1,0 +1,19 @@
+{
+  "name": "plugin-kernel-sh",
+  "owner": { "name": "yigitkonur", "url": "https://github.com/yigitkonur" },
+  "metadata": {
+    "description": "Claude Code plugin for Kernel (kernel.sh) cloud browsers in TypeScript.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "kernel",
+      "description": "Steering for Kernel (kernel.sh) cloud browsers in TypeScript projects: a live-tested knowledge skill, debugging and login workflows, hooks that catch deprecated fields and leaked API keys, and the Kernel MCP server.",
+      "version": "0.1.0",
+      "author": { "name": "yigitkonur", "url": "https://github.com/yigitkonur" },
+      "source": "./plugins/kernel",
+      "category": "development",
+      "keywords": ["kernel", "browser-automation", "typescript", "mcp"]
+    }
+  ]
+}
