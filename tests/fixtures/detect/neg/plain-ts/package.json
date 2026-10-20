@@ -1,0 +1,1 @@
+{ "name": "plain", "dependencies": { "playwright-core": "^1.50.0", "zod": "^3.23.0" } }

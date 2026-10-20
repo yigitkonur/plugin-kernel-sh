@@ -1,0 +1,113 @@
+#!/bin/sh
+# kernel-plugin -- helper CLI of the Kernel Claude Code plugin. POSIX sh. Offline, read-only.
+#
+#   kernel-plugin detect [--json] [dir]     is `dir` (default .) a Kernel project? exit 0 either way
+#   kernel-plugin lint <path> [--json]      report deprecated / dangerous Kernel identifiers (rules/stale-api.tsv)
+#   kernel-plugin --help
+#
+# detect --json:
+#   { "detected": true|false, "tier": 0|1|2, "summary": "<text>", "root": "<dir>", "cached": true|false,
+#     "evidence": [ { "tier": 1|2, "group": "<marker group>", "file": "<path>", "line": <n>, "match": "<text>" } ] }
+# lint --json:
+#   { "path": "<path>", "files_scanned": <n>, "rules": <n>,
+#     "counts": { "<rule id>": <n>, ... },
+#     "findings": [ { "id": "K001", "severity": "low|med|high", "file": "<path>", "line": <n>, "text": "<line, <=120 chars>",
+#                     "message": "<what>", "replacement": "<use this>", "url": "<doc>" } ] }
+#   lint prints key literals as found: treat its output as sensitive when K019 fires. A gitignored .env is not reported for K019.
+# Text modes print one line per finding:  <file>:<line>: <id> <severity> <message>. Use <replacement>. <url>
+
+KP_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+if [ -z "$KP_PLUGIN_ROOT" ] || [ ! -f "$KP_PLUGIN_ROOT/lib/common.sh" ]; then
+  case "$0" in */*) KP_PLUGIN_ROOT="${0%/*}/.." ;; *) KP_PLUGIN_ROOT="$(dirname "$(command -v "$0")")/.." ;; esac
+fi
+KP_PLUGIN_ROOT="$(cd "$KP_PLUGIN_ROOT" 2>/dev/null && pwd)" || exit 2
+. "$KP_PLUGIN_ROOT/lib/common.sh" || exit 2
+. "$KP_PLUGIN_ROOT/lib/detect.sh" || exit 2
+. "$KP_PLUGIN_ROOT/lib/rules.sh" || exit 2
+
+usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+
+cmd_detect() {
+  json=0; dir=""
+  for a in "$@"; do case "$a" in --json) json=1 ;; -*) usage ;; *) dir="$a" ;; esac; done
+  kp_detect "${dir:-.}"
+  if [ "$json" = 1 ]; then
+    [ "$KP_DET" = 1 ] && b=true || b=false
+    [ "$KP_DET_CACHED" = 1 ] && c=true || c=false
+    printf '{"detected":%s,"tier":%s,"summary":"%s","root":"%s","cached":%s,"evidence":[' "$b" "${KP_DET_TIER:-0}" \
+      "$(printf '%s' "$KP_DET_SUMMARY" | json_escape)" "$(printf '%s' "$KP_DET_ROOT" | json_escape)" "$c"
+    printf '%s\n' "$KP_DET_EVIDENCE" | awk -F'\t' 'function je(s,  o, i, ch) { o = ""; for (i = 1; i <= length(s); i++) { ch = substr(s, i, 1); if (ch == "\\") o = o "\\\\"; else if (ch == "\"") o = o "\\\""; else o = o ch } return o }
+      NF >= 5 { printf "%s{\"tier\":%s,\"group\":\"%s\",\"file\":\"%s\",\"line\":%s,\"match\":\"%s\"}", (c++ ? "," : ""), substr($1, 2), je($2), je($3), $4 + 0, je($5) }'
+    printf ']}\n'
+  elif [ "$KP_DET" = 1 ]; then
+    printf 'kernel detected (tier %s): %s\n' "$KP_DET_TIER" "$KP_DET_SUMMARY"
+  else
+    printf 'no kernel markers found\n'
+  fi
+  exit 0
+}
+
+cmd_lint() {
+  json=0; path=""
+  for a in "$@"; do case "$a" in --json) json=1 ;; -*) usage ;; *) path="$a" ;; esac; done
+  [ -n "$path" ] && [ -e "$path" ] || { echo "kernel-plugin lint: path not found: ${path:-<none>}" >&2; exit 2; }
+  list="$(mktemp "${TMPDIR:-/tmp}/kp-lint.XXXXXX")" || exit 2
+  trap 'rm -f "$list" "$list.c" "$list.f" "$list.o"' EXIT
+  if [ -d "$path" ]; then
+    if ( cd "$path" && git rev-parse --is-inside-work-tree >/dev/null 2>&1 ); then
+      ( cd "$path" && git ls-files -z -co --exclude-standard 2>/dev/null ) > "$list.f"
+    else
+      ( cd "$path" && find . \( -name node_modules -o -name .git -o -name vendor -o -name dist -o -name target -o -name .venv \) -prune -o \
+          -type f -size -1025 -print0 2>/dev/null ) > "$list.f"
+    fi
+    # run from inside the directory so names stay short; skip locks/minified/maps
+    base="$path"
+  else
+    printf '%s\0' "${path##*/}" > "$list.f"; base="${path%/*}"; [ "$base" = "$path" ] && base="."
+  fi
+  total="$(tr -cd '\0' < "$list.f" | wc -c | tr -d ' ')"
+  : > "$list.c"
+  if [ -s "$list.f" ]; then
+    u="$(kp_rules_union)"
+    ( cd "$base" && xargs -0 grep -I -l -E -e "$u" /dev/null < "$list.f" 2>/dev/null ) \
+      | grep -v -E '(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lock|npm-shrinkwrap\.json)$|\.min\.js$|\.map$|^/dev/null$' > "$list.c"
+  fi
+  : > "$list.o"
+  if [ -s "$list.c" ]; then
+    tr '\n' '\0' < "$list.c" | ( cd "$base" && xargs -0 awk -f "$KP_PLUGIN_ROOT/lib/rules-lint.awk" -v rl="$KP_RULES" 2>/dev/null ) \
+      | sed -e 's#^\./##' > "$list.o"
+    # a key literal in a gitignored .env (or outside git) is the supported place: drop K019 there
+    if grep -q "${KP_TAB}K019${KP_TAB}" "$list.o"; then
+      : > "$list.f"
+      while IFS= read -r row; do
+        case "$row" in
+          *"${KP_TAB}K019${KP_TAB}"*) f="${row%%"$KP_TAB"*}"; if kp_env_ok "$base/$f"; then continue; fi ;;
+        esac
+        printf '%s\n' "$row" >> "$list.f"
+      done < "$list.o"
+      mv "$list.f" "$list.o"
+    fi
+  fi
+  nrules="$(awk -F'\t' '/^#/ || NF < 7 { next } END { print NR - c }' c="$(grep -c '^#' "$KP_RULES")" "$KP_RULES")"
+  if [ "$json" = 1 ]; then
+    awk -F'\t' -v path="$path" -v total="$total" -v nrules="$nrules" '
+      function je(s,  o, i, ch) { o = ""; for (i = 1; i <= length(s); i++) { ch = substr(s, i, 1); if (ch == "\\") o = o "\\\\"; else if (ch == "\"") o = o "\\\""; else o = o ch } return o }
+      { cnt[$3]++; ids[$3] = 1
+        f = f sprintf("%s{\"id\":\"%s\",\"severity\":\"%s\",\"file\":\"%s\",\"line\":%d,\"text\":\"%s\",\"message\":\"%s\",\"replacement\":\"%s\",\"url\":\"%s\"}", (nf++ ? "," : ""), $3, $4, je($1), $2, je($5), je($6), je($7), je($8)) }
+      END { c = ""; n = 0; for (i in ids) keys[++n] = i
+            for (a = 1; a <= n; a++) for (b = a + 1; b <= n; b++) if (keys[b] < keys[a]) { t = keys[a]; keys[a] = keys[b]; keys[b] = t }
+            for (a = 1; a <= n; a++) c = c sprintf("%s\"%s\":%d", (a > 1 ? "," : ""), keys[a], cnt[keys[a]])
+            printf "{\"path\":\"%s\",\"files_scanned\":%d,\"rules\":%d,\"counts\":{%s},\"findings\":[%s]}\n", je(path), total, nrules, c, f }' "$list.o"
+  else
+    awk -F'\t' '{ printf "%s:%s: %s %s %s. Use %s. %s\n", $1, $2, $3, $4, $6, $7, $8 }' "$list.o"
+    n="$(wc -l < "$list.o" | tr -d ' ')"
+    printf 'kernel-plugin lint: %s finding(s) in %s file(s)\n' "$n" "$total" >&2
+  fi
+  exit 0
+}
+
+case "${1:-}" in
+  detect) shift; cmd_detect "$@" ;;
+  lint) shift; cmd_lint "$@" ;;
+  *) usage ;;
+esac

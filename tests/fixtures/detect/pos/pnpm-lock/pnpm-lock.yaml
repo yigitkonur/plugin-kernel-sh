@@ -1,0 +1,7 @@
+lockfileVersion: '9.0'
+importers:
+  .:
+    dependencies:
+      '@onkernel/sdk':
+        specifier: ^0.127.0
+        version: 0.127.0

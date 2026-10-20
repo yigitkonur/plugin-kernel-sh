@@ -1,0 +1,1 @@
+{ "name": "app", "dependencies": { "@onkernel/sdk": "^0.127.0", "playwright-core": "^1.50.0" } }

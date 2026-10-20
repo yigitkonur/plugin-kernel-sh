@@ -1,0 +1,5 @@
+{
+  "lockfileVersion": 1,
+  "workspaces": { "": { "dependencies": { "@onkernel/sdk": "^0.127.0" } } },
+  "packages": { "@onkernel/sdk": ["@onkernel/sdk@0.127.0", "", {}, "sha512-fixture"] }
+}

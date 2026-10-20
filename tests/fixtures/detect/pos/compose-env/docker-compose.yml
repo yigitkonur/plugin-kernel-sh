@@ -1,0 +1,5 @@
+services:
+  worker:
+    image: node:22
+    environment:
+      - KERNEL_API_KEY=${KERNEL_API_KEY}
