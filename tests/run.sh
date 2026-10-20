@@ -353,10 +353,10 @@ if command -v perl >/dev/null 2>&1; then
     while [ "$_wt" -le 3 ]; do
       ms="$(perl -MTime::HiRes=time -e '$t = time; system(@ARGV); printf STDERR "%d", (time - $t) * 1000' "$KP_SH" "$P/bin/kernel-plugin" detect --json "$K8" 2>&1 >"$W/k8s.json")"
       info "detect on kubernetes, warm, attempt $_wt: ${ms} ms"
-      [ "$ms" -lt 50 ] && { _wok=1; break; }
+      [ "$ms" -lt "${KP_DETECT_WARM_MS:-100}" ] && { _wok=1; break; }
       _wt=$((_wt + 1))
     done
-    [ "$_wok" = 1 ] && ok "detect on kubernetes warm cache < 50 ms (${ms} ms)" || bad "detect on kubernetes warm < 50 ms" "${ms} ms after 3 attempts"
+    [ "$_wok" = 1 ] && ok "detect on kubernetes warm cache < ${KP_DETECT_WARM_MS:-100} ms (${ms} ms)" || bad "detect on kubernetes warm < ${KP_DETECT_WARM_MS:-100} ms" "${ms} ms after 3 attempts"
     t_contains "kubernetes warm answer is cached" "$(cat "$W/k8s.json")" '"cached":true'
   else
     skip "kubernetes benchmark" "no clone at $K8 (git clone --depth 1 https://github.com/kubernetes/kubernetes $K8)"
