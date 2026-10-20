@@ -40,7 +40,7 @@ console.log(result.analysis?.status, result.recommendation?.type, Boolean(result
 | 4 | Residential proxy | Geo needs, or fingerprint-heavy vendors where the network layer is not the main signal |
 | 5 | GPU browser (`gpu: true`, headful) | Sites that cross-check canvas/WebGL against the claimed GPU. Plan-gated (below) |
 | 6 | Mobile proxy | Advanced stealth cases only |
-| 7 | Web Bot Auth | Sites that honor signed bot identities (section 12) |
+| 7 | Web Bot Auth | Sites that honor signed bot identities (section 13) |
 
 **Avoid** headless on defended sites; overriding user-agent or headers; extra extensions (each adds a detectable fingerprint); deep links straight to a login page; bursts of parallel sessions from one IP; self-hosted Playwright when `playwright.execute` works. **Source** https://www.kernel.sh/docs/browsers/bot-detection/overview, https://www.kernel.sh/docs/browsers/bot-detection/stealth.
 
@@ -53,7 +53,7 @@ console.log(result.analysis?.status, result.recommendation?.type, Boolean(result
 
 | Create params | Egress | Captcha solver | `browser.proxy` in response |
 |---|---|---|---|
-| `{}` (non-stealth) | Direct | No | not set to a proxy |
+| `{}` (non-stealth) | Direct (SDK types) | No | (unverified: not captured) |
 | `{ stealth: true }` | Shared ISP pool IP, static for that session, may differ next session | Yes | `{ mode: 'default' }` |
 | `{ proxy: { mode: 'direct' } }` | Direct | No | `{ mode: 'direct' }` |
 | `{ stealth: true, proxy: { id } }` | Your proxy | Yes (SDK types) | `{ id }` |
@@ -85,7 +85,7 @@ const browser = await kernel.browsers.create({ proxy: { id: proxy.id } });
 await kernel.browsers.deleteByID(browser.session_id);
 ```
 
-- `proxies.create` with `{ type: 'isp', name }` worked on Hobbyist; `proxies.delete(id)` then retrieve returns 404. Attached proxies are never auto-deleted.
+- `proxies.create` with `{ type: 'isp', name }` worked on Hobbyist; `proxies.delete(id)` then retrieve returns 404. The docs say proxies unused for 14 days may be auto-deleted when the org has over 100; attached ones are kept.
 - Add `stealth: true` to keep the captcha solver on your own proxy.
 - Countries: docs list US, SG, GB, FR, DE; the SDK comment and CLI help also list KR. Only the default US was tested. Check `kernel proxies create --help` before relying on another country.
 - Some orgs get a backup ISP endpoint; during a primary outage the site may briefly see a different IP (docs).
