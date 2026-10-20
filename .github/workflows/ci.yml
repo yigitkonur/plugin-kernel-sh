@@ -1,0 +1,29 @@
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix: { os: [ubuntu-latest, macos-latest] }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Tools
+        run: |
+          python3 -m pip install --quiet pyyaml || python3 -m pip install --quiet --break-system-packages pyyaml || true
+          command -v jq >/dev/null || (command -v apt-get >/dev/null && sudo apt-get install -y jq) || brew install jq
+      - name: Hook, detection and rule tests
+        run: sh tests/run.sh
+      - name: Install Claude Code CLI (for plugin validate)
+        run: npm i -g @anthropic-ai/claude-code
+      - name: Validate plugin and marketplace
+        run: scripts/validate.sh
+      - name: Secret scan (tree and history)
+        run: |
+          scripts/secret-scan.sh --tree
+          scripts/secret-scan.sh --history

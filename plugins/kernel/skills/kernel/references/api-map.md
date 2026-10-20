@@ -1,7 +1,7 @@
 # API map: TypeScript SDK, REST, CLI, MCP
 
 Read when you need the exact name of a Kernel method, flag, REST route or MCP tool, or to check whether something exists.
-Names below were checked against `@onkernel/sdk` 0.127.0 (type definitions and source), `kernel` CLI 0.49.0 (`--help`) and the hosted MCP server source on 2026-10-20. The installed types in `node_modules/@onkernel/sdk` and `kernel <command> --help` always win over this file; if they disagree, trust them and say so.
+Names below were checked against `@onkernel/sdk` 0.127.0 and re-diffed against 0.128.0 (type definitions and source), `kernel` CLI 0.49.0 (`--help`) and the hosted MCP server source on 2026-10-20. The installed types in `node_modules/@onkernel/sdk` and `kernel <command> --help` always win over this file; if they disagree, trust them and say so.
 
 Conventions that apply everywhere:
 - REST base is `https://api.onkernel.com` with `Authorization: Bearer <key>`. The reference is https://www.kernel.sh/docs/api-reference and the spec is https://api.onkernel.com/spec.json.
@@ -56,6 +56,7 @@ Shapes you will branch on:
 - `playwright.execute` response: `success`, optional `result`, `error`, `stderr`, `stdout`, `tab`. A thrown error inside your code gives HTTP 200 with `success: false`, so check `success`.
 - `ExecutorLimitError` is a response interface `{ executors, message }` returned when a call would exceed the per-browser executor limit (documented as HTTP 409).
 - `computer.pressKey` takes `{ keys: string[], duration?, hold_keys? }`, not a single string. `computer.typeText` takes `{ text, delay? }` only: the docs mention `smooth` and `typo_chance`, but neither the 0.127.0 types, the REST page nor the CLI have them.
+- 0.128.0 added `location` on browsers: the create response always carries `{ locale, locale_source, timezone, timezone_source }` (`'metro'` = default for the browser's region); a request override `location: { locale?, timezone? }` is gated per organization (a 400 "browser location is not enabled for this organization" otherwise). It also added allowlist fencing: `network.allowed_hosts` updates can carry `expected_allowlist_revision` plus a unique `mutation_id` (read `network.allowlist_state.revision` first); a stale revision returns 409 `stale_network`; reuse both values when retrying an uncertain update.
 - Deprecated on browsers: `proxy_id` (use `proxy`), `disable_default_proxy` (use `proxy.mode`). `proxy` is `{ id?, name?, mode?: 'direct' | 'default' }`. Telemetry events `captcha_type` is deprecated for `captcha_provider` (and `task_kind`).
 
 ## Profiles, pools, proxies, extensions
@@ -64,7 +65,7 @@ Shapes you will branch on:
 |---|---|---|---|---|
 | profiles | `profiles.{create, retrieve, update, list, delete, download}` | `/profiles`, `/profiles/{id_or_name}`, `.../download` | `kernel profiles create\|get\|update\|list\|delete\|download --to` | `manage_profiles` |
 | pools | `browserPools.{create, retrieve, update, list, delete, acquire, release, flush}` | `/browser_pools`, `.../{id_or_name}`, `POST .../acquire\|release\|flush` | `kernel browser-pools create\|get\|update\|list\|delete\|acquire\|release\|flush` | `manage_browser_pools` |
-| proxies | `proxies.{create, retrieve, update, list, delete, check}` | `/proxies`, `POST /proxies/{id}/check` | `kernel proxies create\|get\|update\|list\|delete\|check` | `manage_proxies` |
+| proxies | `proxies.{create, retrieve(idOrName), update(idOrName), list, delete, check}` | `/proxies`, `POST /proxies/{id}/check` | `kernel proxies create\|get\|update\|list\|delete\|check` | `manage_proxies` |
 | extensions | `extensions.{upload, list, get, download, downloadFromChromeStore, delete}` | `/extensions`, `/extensions/{id_or_name}`, `.../metadata`, `/extensions/from_chrome_store` | `kernel extensions list\|get\|upload\|download\|download-web-store\|delete` | `manage_extensions` |
 
 - `profiles.update` only renames (`name` required).
@@ -123,4 +124,4 @@ See `references/does-not-exist.md`. The usual hallucinations: `browsers.delete`,
 
 ## Verified in lab
 
-Verified: 2026-10-20 against `@onkernel/sdk` 0.127.0 types and source, `kernel` CLI 0.49.0 `--help`, MCP server source at commit 5c0e58b. Live checks so far: `browsers.create/retrieve/deleteByID`, `playwright.execute` shapes, `auth context`, audit-log gating (probes P01, P23). Not yet verified live and marked as such where used: REST routes for most resources, MCP tool behavior beyond `initialize`.
+Verified: 2026-10-20 against `@onkernel/sdk` 0.127.0 types and source (0.128.0 diff reviewed), `kernel` CLI 0.49.0 `--help`, MCP server source at commit 5c0e58b. Live checks so far: `browsers.create/retrieve/deleteByID`, `playwright.execute` shapes, `auth context`, audit-log gating (probes P01, P23). Not yet verified live and marked as such where used: REST routes for most resources, MCP tool behavior beyond `initialize`.

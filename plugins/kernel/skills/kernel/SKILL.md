@@ -14,7 +14,7 @@ Rule zero: if the task can be done through an API or an MCP server, use that and
 
 1. **Can an API or MCP do it?** Yes: no browser.
 2. **Exploring, debugging or one-off checks right now:** the `kernel` CLI or the Kernel MCP (`references/cli.md`, `references/mcp.md`). **Code that ships:** `@onkernel/sdk` (`references/sdk-client.md`).
-3. **Create a browser per task, on demand.** Creating one takes well under a second, so do not cache browsers "for speed" (pools are for fixed config at steady traffic: `references/scale.md`). Set `timeout_seconds` on purpose. Headful is the default and the right choice when anyone watches, you record a replay, or the site defends itself; headless only for unwatched, undefended, high-volume work.
+3. **Create a browser per task, on demand.** Creating one takes well under a second (a few hundred ms from a laptop), so do not cache browsers "for speed" (pools are for fixed config at steady traffic: `references/scale.md`). Set `timeout_seconds` on purpose. Headful is the default and the right choice when anyone watches, you record a replay (headless rejects replays), or the site defends itself; headless only for unwatched, undefended, high-volume work, and give it `memory: '4GiB'` if one browser runs many parallel tabs or named executors (the 1 GiB default starves around the fifth).
 4. **Drive the page**, in this order: `kernel.browsers.playwright.execute` (default), computer controls for the one step selectors cannot do, and `chromium.connectOverCDP` from `playwright-core` only for existing Playwright or Puppeteer code (https://www.kernel.sh/docs/introduction/control). Details: `references/control.md`.
 5. **Delete the browser yourself**, in `finally`: `kernel.browsers.deleteByID(id)`. Closing a Playwright connection only disconnects.
 6. **Need something specific?** Use the router below.
@@ -32,7 +32,7 @@ Rule zero: if the task can be done through an API or an MCP server, use that and
 | Scoping to a project | `projectID` takes an ID only; `project` takes an ID or exact name (and is what the CLI's `--project` and `KERNEL_PROJECT` mean) | `projectID: process.env.KERNEL_PROJECT` (that variable may hold a name) | https://www.kernel.sh/docs/info/projects |
 | Copying a field from docs prose or another skill | Trust the API reference and the installed types | Deprecated fields still shown in prose and in Kernel's own sample skills (`proxy_id` or `disable_default_proxy` on browsers, `datacenter` proxies, `persistent`) | `references/does-not-exist.md` |
 | Unsure whether a feature exists | Check `references/does-not-exist.md`, then the live docs | Inventing method names | https://www.kernel.sh/docs/llms.txt |
-| Catching errors | `catch (e) { if (e instanceof Kernel.APIError) ... }` and read `e.status` and `e.headers?.get('x-request-id')`; treat 429 and 529 as "slow down", not as failure | Swallowing errors | `references/sdk-client.md` |
+| Catching errors | `catch (e) { if (e instanceof Kernel.APIError) ... }`: `e.status`, `e.error` (the parsed JSON body, e.g. `{ code, message }`) and `e.headers?.get('x-request-id')`; a 404 from `deleteByID` after a timeout reaped the browser is fine; treat 429 and 529 as "slow down" | Swallowing errors; assuming a failed `playwright.execute` throws (it returns `success: false`) | `references/sdk-client.md` |
 
 ## Verify instead of remembering
 
