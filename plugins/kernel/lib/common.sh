@@ -59,12 +59,15 @@ kp_emit() {
 # another user plant a symlink or a fake cache entry). If it is unusable the path points nowhere, every state write
 # fails silently and the hooks carry on without state.
 kp_state_root() {
-  if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then _kp_sr="$CLAUDE_PLUGIN_DATA/state"
-  else _kp_sr="${TMPDIR:-/tmp}/kernel-plugin-state-${USER:-$(id -u)}"; fi
+  _kp_shared=0
+  if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then _kp_sr="$CLAUDE_PLUGIN_DATA/state"   # Claude Code's own per-user plugin data
+  else _kp_sr="${TMPDIR:-/tmp}/kernel-plugin-state-${USER:-$(id -u)}"; _kp_shared=1; fi
   [ -d "$_kp_sr" ] || mkdir -p -m 700 "$_kp_sr" 2>/dev/null
   if [ -d "$_kp_sr" ]; then
-    [ -O "$_kp_sr" ] 2>/dev/null; _kp_rc=$?   # 1 = not ours; 2 = this shell has no -O: accept
-    [ "$_kp_rc" != 1 ] || _kp_sr="/nonexistent-kernel-plugin-state"
+    if [ "$_kp_shared" = 1 ]; then   # a shared temp folder: use the directory only if it is ours
+      [ -O "$_kp_sr" ] 2>/dev/null; _kp_rc=$?   # 1 = not ours; 2 = this shell has no -O: accept
+      [ "$_kp_rc" != 1 ] || _kp_sr="/nonexistent-kernel-plugin-state"
+    fi
   else _kp_sr="/nonexistent-kernel-plugin-state"; fi
   printf '%s' "$_kp_sr"
 }

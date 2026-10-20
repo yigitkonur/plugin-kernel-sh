@@ -151,7 +151,8 @@ Include the credential field schema (names, types, sensitive flags), field-to-se
 Leak check before the file is final. Run this on the draft and fix every hit:
 
 ```bash
-grep -nEi 'sk_[0-9a-f]{8}-|jwt=|handoff_code=|wss?://|onkernel\.com/browser/(live|replay|cdp)|token=|session=|api[_-]?key|password|@[a-z0-9.-]+\.[a-z]{2,}' <file>
+grep -c -E 'sk_[0-9a-fA-F]{8}-' <file>   # a count only: a key must never be echoed; any count above 0 is a hit to fix
+grep -nEi 'jwt=|handoff_code=|wss?://|onkernel\.com/browser/(live|replay|cdp)|token=|session=|api[_-]?key|password|@[a-z0-9.-]+\.[a-z]{2,}' <file>
 ```
 
 Strip query strings from documented URLs and remove any recorded ids. `password` hits are fine only as a field name or type, never a value. Re-run until only those remain.

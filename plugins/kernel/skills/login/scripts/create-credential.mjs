@@ -13,6 +13,13 @@
 const [name, domain] = process.argv.slice(2);
 const { KERNEL_API_KEY, SITE_USER, SITE_PASSWORD, SITE_TOTP_SECRET, KERNEL_PROJECT, KERNEL_BASE_URL } = process.env;
 const base = (KERNEL_BASE_URL || 'https://api.onkernel.com').replace(/\/+$/, '');
+let baseUrl;
+try { baseUrl = new URL(base); } catch { baseUrl = null; }
+// the key and the password travel in this request: never over cleartext (http is accepted for localhost only, for tests)
+if (!baseUrl || !(baseUrl.protocol === 'https:' || (baseUrl.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(baseUrl.hostname)))) {
+  console.error('create-credential: KERNEL_BASE_URL must be an https URL');
+  process.exit(2);
+}
 
 const missing = [];
 if (!name || !domain) missing.push('arguments <credential-name> <domain>');

@@ -6,7 +6,7 @@ def clean:
   if type != "string" then . else
     gsub("(?<k>(?i:bearer|basic)\\s+)[^\\s\"']+"; "\(.k)***")
     | gsub("(?<k>(?i:(set-)?cookie)[\"']?\\s*[:=]\\s*[\"']?)[^\\n\"']*"; "\(.k)***")
-    | gsub("(?<k>[A-Za-z0-9_.-]*(?i:authorization|auth|password|passwd|secret|token|api[_-]?key|apikey|private[_-]?key|jwt|signature|credential|session)[A-Za-z0-9_.-]*[\"']?\\s*[:=]\\s*[\"']?)[^\\s\"',;&}]+"; "\(.k)***")
+    | gsub("(?<k>[A-Za-z0-9_.-]{0,40}(?i:authorization|auth|password|passwd|secret|token|api[_-]?key|apikey|private[_-]?key|jwt|signature|credential|session)[A-Za-z0-9_.-]{0,40}[\"']?\\s*[:=]\\s*[\"']?)[^\\s\"',;&}]+"; "\(.k)***")
     | gsub("eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]*)?"; "***jwt***")
     | gsub("(?<k>//)[^/\\s@]*@"; "\(.k)***@")
     | gsub("[?#][^\\s\"']*"; "?***")

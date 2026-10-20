@@ -108,6 +108,19 @@ if [ "$KP_HAVE_JQ" = 1 ]; then
   t_contains "events.jq keeps the diagnostic columns" "$EVOUT" 'network_response	500'
   t_contains "events.jq keeps a page-level failed navigation" "$EVOUT" 'net::ERR_ABORTED'
 fi
+# QC pass: the redaction filter must stay linear on one long token (page-controlled text)
+if [ "$KP_HAVE_JQ" = 1 ]; then
+  LONGTOK="$(awk 'BEGIN { for (i = 0; i < 12000; i++) printf "a" }')"
+  printf '{"events":[{"seq":1,"event":{"ts":1760000000000000,"type":"console_error","data":{"text":"%s"}}}]}' "$LONGTOK" > "$W/long.json"
+  t0=$(date +%s); jq -r -f "$P/skills/debug-session/scripts/events.jq" "$W/long.json" >/dev/null 2>&1; t1=$(date +%s)
+  [ $((t1 - t0)) -lt 2 ] && ok "events.jq handles a 12 KB single token in under 2 s ($((t1 - t0)) s)" || bad "events.jq long-token cost" "$((t1 - t0)) s"
+  jq -r -f "$P/skills/debug-session/scripts/events.jq" "$F/debug/events-secrets.json" | grep -q 'Cookie: \*\*\*' && ok "events.jq redacts a whole Cookie line" || bad "events.jq redacts a whole Cookie line" "not redacted"
+fi
+# create-credential.mjs refuses a cleartext base URL (it sends the key and the password)
+if command -v node >/dev/null 2>&1; then
+  KERNEL_BASE_URL=http://example.com KERNEL_API_KEY=dummy SITE_USER=u SITE_PASSWORD=p node "$P/skills/login/scripts/create-credential.mjs" n example.com >/dev/null 2>&1; rc=$?
+  t_eq "create-credential refuses an http KERNEL_BASE_URL (exit 2)" "$rc" "2"
+fi
 # a_b and a/b used to map to one cache key: a negative result in one hid a Kernel project in the other
 mkdir -p "$W/ck/a_b" "$W/ck/a/b"; printf '{"dependencies":{"@onkernel/sdk":"^0.128.0"}}' > "$W/ck/a_b/package.json"; printf '{}' > "$W/ck/a/b/package.json"
 "$KP_SH" "$P/bin/kernel-plugin" detect --json "$W/ck/a/b" >/dev/null 2>&1
@@ -340,6 +353,10 @@ LKOUT="$("$KP_SH" "$P/bin/kernel-plugin" lint "$LK" --json 2>&1)"; LKTXT="$("$KP
 t_contains "lint reports K019 for a key literal" "$LKOUT" '"id":"K019"'
 has "$LKOUT$LKTXT" "AAAAAAAAAAAAAAAAAAAAAAAA" && bad "lint never echoes the key" "key text present in lint output" || ok "lint never echoes the key"
 t_contains "lint masks the K019 text" "$LKOUT" '[key literal masked]'
+LK2="$W/lintkey2"; mkdir -p "$LK2"; printf 'NEXT_PUBLIC_KERNEL_API_KEY=%s\nconsole.log("x", browser.cdp_ws_url, "%s");\n' "$KEY" "$KEY" > "$LK2/a.ts"
+LK2OUT="$("$KP_SH" "$P/bin/kernel-plugin" lint "$LK2" --json 2>&1)$("$KP_SH" "$P/bin/kernel-plugin" lint "$LK2" 2>&1)"
+t_contains "lint reports K015 and K016 on those lines" "$LK2OUT" '"id":"K016"'
+has "$LK2OUT" "AAAAAAAAAAAAAAAAAAAAAAAA" && bad "lint never echoes a key on K015/K016 rows" "key text present" || ok "lint never echoes a key on K015/K016 rows"
 t_contains "H3 finding with jq absent (sed fallback)" "$(mk_add "$(newsid)" | KP_NO_JQ=1 "$KP_SH" "$P/hooks/edit-tripwire.sh" 2>/dev/null)" ' K001 '
 
 # ---------------------------------------------------------------- opt-out and garbage
