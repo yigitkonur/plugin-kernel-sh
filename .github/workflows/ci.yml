@@ -45,3 +45,5 @@ jobs:
           sudo apt-get remove -y jq
           ! command -v jq
           sh tests/run.sh
+        env:
+          KP_BENCH_MS: 150   # the sed fallback is slower than jq; this run checks behavior, not speed
