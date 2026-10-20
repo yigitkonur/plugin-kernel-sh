@@ -319,15 +319,16 @@ out="$(payload "$F/payloads/SessionStart.startup.json" "$KPROJ" "$(newsid)" | CL
 echo "--- timing"
 # Timings are noisy when the machine is busy: a gate passes if ANY of up to 3 attempts meets it, and every attempt is printed.
 PERL_P95='($sh, $hook, $pl, $st) = @ARGV; for (1..200) { unlink $st if $st; open(STDIN, "<", $pl); open(STDOUT, ">", "/dev/null"); $t = time; system($sh, $hook); push @d, (time - $t) * 1000 } @d = sort { $a <=> $b } @d; printf STDERR "%.1f %.1f %.1f", $d[100], $d[189], $d[199]'
-bench_hook() { # bench_hook <label> <script> <payload> [statefile-to-unlink] [gate]  -> PASS if p95 < 50 ms in any of 3 attempts
+BUDGET="${KP_BENCH_MS:-50}"   # p95 budget per hook call; CI raises it on shared macOS runners, where spawning processes is ~5x slower than on a laptop
+bench_hook() { # bench_hook <label> <script> <payload> [statefile-to-unlink] [gate]  -> PASS if p95 < $BUDGET ms in any of 3 attempts
   _bt=1; _bok=0
   while [ "$_bt" -le 3 ]; do
     set -- "$1" "$2" "$3" "${4:-}" "${5:-gate}" $(perl -MTime::HiRes=time -e "$PERL_P95" "$KP_SH" "$2" "$3" "${4:-}" 2>&1 >/dev/null)
     info "$1, attempt $_bt, 200 runs: median $6 ms, p95 $7 ms, max $8 ms"
-    awk -v p="$7" 'BEGIN { exit !(p < 50) }' && { _bok=1; break; }
+    awk -v p="$7" -v b="$BUDGET" 'BEGIN { exit !(p < b) }' && { _bok=1; break; }
     _bt=$((_bt + 1))
   done
-  if [ "$5" = gate ]; then [ "$_bok" = 1 ] && ok "$1: p95 < 50 ms ($7 ms)" || bad "$1: p95 < 50 ms" "$7 ms after 3 attempts"; fi
+  if [ "$5" = gate ]; then [ "$_bok" = 1 ] && ok "$1: p95 < $BUDGET ms ($7 ms)" || bad "$1: p95 < $BUDGET ms" "$7 ms after 3 attempts"; fi
 }
 if command -v perl >/dev/null 2>&1; then
   sid="$(newsid)"

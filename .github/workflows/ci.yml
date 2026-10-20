@@ -19,6 +19,9 @@ jobs:
           command -v jq >/dev/null || (command -v apt-get >/dev/null && sudo apt-get install -y jq) || brew install jq
       - name: Hook, detection and rule tests
         run: sh tests/run.sh
+        env:
+          # p95 budget per hook call: 50 ms on a laptop and Linux runners; the shared macOS runner spawns processes ~5x slower
+          KP_BENCH_MS: ${{ matrix.os == 'macos-latest' && '400' || '50' }}
       - name: Install Claude Code CLI (for plugin validate)
         run: npm i -g @anthropic-ai/claude-code
       - name: Validate plugin and marketplace
