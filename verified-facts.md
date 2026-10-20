@@ -266,3 +266,13 @@ How to read this file. Each row is one claim that was tried against the live ser
 | P23.5 | Project header semantics | confirmed | The id header takes an id only; the project header takes a name or an id; wrong values give 404 `project_not_found` |
 | P23.6 | Environment variables the SDK reads | confirmed | API key, base URL, log level, custom headers, Bun warning, browser routing; it does not read a project variable |
 | P23.7 | Scoped API keys with `policy` and `expires_at` | untested | Documentation only; no key was created |
+
+## MCP inside Claude Code (lead checks)
+
+| id | claim | result | evidence |
+|---|---|---|---|
+| M1 | A Bearer API key in a project-style `.mcp.json` header (`Bearer ${KERNEL_API_KEY}`) connects to the hosted Kernel MCP | confirmed | Status connected, 31 tools; `get_connection_context` and `search_docs` answered |
+| M2 | The same config with the variable unset | confirmed | Server status failed (visible failure, not a silent unauthenticated session) |
+| M3 | The plugin-bundled `.mcp.json` (OAuth, no secret) before authentication | confirmed | Status needs-auth, registers no Kernel tools; the user authenticates once through `/mcp` |
+| M4 | Context cost of the Kernel MCP tools after authentication | confirmed | About +1,040 input tokens for a trivial prompt (tools are deferred, names only) |
+| M5 | OAuth completes in Claude Code | untested | Needs a human browser step |
