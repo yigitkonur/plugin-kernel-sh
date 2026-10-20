@@ -1,0 +1,19 @@
+{
+  "description": "Kernel: project primer, stale-identifier tripwire, API-key guard",
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/context.sh", "session"], "timeout": 10 } ] }
+    ],
+    "SubagentStart": [
+      { "hooks": [ { "type": "command", "command": "sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/context.sh", "subagent"], "timeout": 10 } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [ { "type": "command", "command": "sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/secret-guard.sh"], "timeout": 5 } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [ { "type": "command", "command": "sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/edit-tripwire.sh"], "timeout": 10 } ] }
+    ]
+  }
+}

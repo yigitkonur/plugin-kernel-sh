@@ -1,0 +1,1 @@
+{ "name": "vm", "dependencies": { "@onkernel/hypeman": "^1.0.0" } }

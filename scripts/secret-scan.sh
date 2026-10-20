@@ -20,8 +20,9 @@ scan_stream() { # reads text on stdin, label in $1
   printf '%s\n' "$text" | grep -E -o "$KEY_RE" | grep -v -E "^$PLACEHOLDER" | grep -q . && report "$label: Kernel API key literal"
   printf '%s\n' "$text" | grep -E -q "$HOME_RE" && report "$label: local path or personal e-mail"
   printf '%s\n' "$text" | grep -E -q "$URL_RE" && report "$label: unmasked credential URL (jwt/handoff_code/access_token)"
-  # the real lab key and production ids, only when the local files exist (they are never in the repo)
-  local envf="$REPO/../kernel-plugin-plan/lab.env" idf="$REPO/../kernel-plugin-plan/ref/preexisting.ids" real
+  # maintainers: set KP_LAB_DIR to a private directory (outside the repo) holding lab.env and ref/preexisting.ids to also
+  # scan for the real throwaway key and for production resource ids. Unset: this part is skipped.
+  local envf="${KP_LAB_DIR:-/nonexistent}/lab.env" idf="${KP_LAB_DIR:-/nonexistent}/ref/preexisting.ids" real
   if [ -f "$envf" ]; then
     real="$(sed -n 's/^KERNEL_API_KEY=//p' "$envf")"
     [ -n "$real" ] && printf '%s\n' "$text" | grep -F -q -- "$real" && report "$label: the REAL lab key"

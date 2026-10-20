@@ -1,0 +1,23 @@
+# markers.tsv -- Kernel detection markers (PLAN section 5). Tab separated, '#' lines ignored.
+# columns: tier | group | scope | ERE | exclude-ERE (optional) | needles
+#   tier 1  one hit is enough.  tier 2  needs hits from two different groups.
+#   scope   all = any text file; cfg = only manifests/CI/config files (.github/workflows, Dockerfile*, Makefile,
+#           docker-compose*, *.tf, .env*, .mcp.json, package.json, lockfiles)
+#   ERE     POSIX ERE, no intervals (older mawk lacks them), no \s/\w.
+#   exclude lines matching it are not a hit for this marker.
+#   needles ';'-separated literal substrings; every line the ERE matches contains one of them. The repo-wide scan
+#           (scope=all) greps for the needles with -F (30x faster than the ERE union on a 28k-file tree) and the
+#           ERE then confirms each candidate line. When you change an ERE, keep its needles in sync.
+1	pkg	all	(^|[^A-Za-z0-9_])@onkernel/(sdk|cli|managed-auth-react|vault-react|cua-agent|cua-ai|cua-cli|cu-playwright|ai-sdk|browser-loop|eve-extension|bot-profiler)		@onkernel/
+1	env-key	all	KERNEL_API_KEY		KERNEL_API_KEY
+1	endpoint	all	api\.onkernel\.com|mcp\.onkernel\.com|wss?://[^/]*\.(onkernel\.com|kernel\.sh):8443/browser/		api.onkernel.com;mcp.onkernel.com;:8443/browser/
+1	header	all	X-Kernel-Project(-Id)?		X-Kernel-Project
+1	install	all	kernel/tap/kernel|onkernel/tap|-g @onkernel/cli|kernel mcp install		kernel/tap;kernel mcp install;@onkernel/cli
+1	terraform	cfg	source[[:space:]]*=[[:space:]]*"kernel/kernel"		kernel/kernel
+1	cli-command	cfg	(^|&&|;|run:|RUN|- )[[:space:]]*kernel[[:space:]]+(deploy|invoke|browsers|browser-pools|profiles|proxies|auth connections|vaults|logs|app|search|login|create)([[:space:]]|$)		kernel 
+2	new-kernel	all	new Kernel\(		new Kernel(
+2	kernel-app	all	kernel\.app\(		kernel.app(
+2	kernel-context	all	KernelContext		KernelContext
+2	onkernel-import	all	from ['"]@onkernel	@onkernel/hypeman	@onkernel
+2	response-fields	all	cdp_ws_url|browser_live_view_url|webdriver_ws_url		cdp_ws_url;browser_live_view_url;webdriver_ws_url
+2	env-names	all	KERNEL_BASE_URL|KERNEL_PROJECT		KERNEL_BASE_URL;KERNEL_PROJECT
