@@ -97,6 +97,9 @@ t_contains "detect negative result is cached too" "$("$KP_SH" "$P/bin/kernel-plu
 t_contains "detect tier-2 pair is tier 2" "$("$KP_SH" "$P/bin/kernel-plugin" detect --json "$W/det/nogit/pos-tier2-pair")" '"tier":2'
 t_contains "detect text mode" "$("$KP_SH" "$P/bin/kernel-plugin" detect "$D")" 'kernel detected'
 t_contains "detect text mode (negative)" "$("$KP_SH" "$P/bin/kernel-plugin" detect "$W/det/nogit/neg-plain-ts")" 'no kernel markers'
+# a relative path ('.') in two different non-git directories must not share a cache entry
+t_contains "detect '.' in a non-git positive dir" "$(cd "$W/det/nogit/pos-package-json" && "$KP_SH" "$P/bin/kernel-plugin" detect --json .)" '"detected":true'
+t_contains "detect '.' in a non-git negative dir is not served the positive's cache" "$(cd "$W/det/nogit/neg-plain-ts" && "$KP_SH" "$P/bin/kernel-plugin" detect --json .)" '"detected":false'
 
 # ---------------------------------------------------------------- rules table + lint
 echo "--- rules"

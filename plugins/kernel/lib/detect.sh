@@ -83,6 +83,7 @@ kp_detect() {
   KP_DET=0; KP_DET_TIER=0; KP_DET_SUMMARY=""; KP_DET_EVIDENCE=""; KP_DET_ROOT=""; KP_DET_CACHED=0
   _kp_dir="${1:-.}"
   [ -d "$_kp_dir" ] || return 0
+  _kp_dir="$(cd "$_kp_dir" 2>/dev/null && pwd -P)" || return 0   # absolute: the cache key comes from it
   _kp_out="$(git -C "$_kp_dir" rev-parse --show-toplevel HEAD 2>/dev/null)"
   if [ -n "$_kp_out" ]; then
     _kp_nl='
