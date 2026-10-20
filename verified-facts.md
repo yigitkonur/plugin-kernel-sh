@@ -276,3 +276,18 @@ How to read this file. Each row is one claim that was tried against the live ser
 | M3 | The plugin-bundled `.mcp.json` (OAuth, no secret) before authentication | confirmed | Status needs-auth, registers no Kernel tools; the user authenticates once through `/mcp` |
 | M4 | Context cost of the Kernel MCP tools after authentication | confirmed | About +1,040 input tokens for a trivial prompt (tools are deferred, names only) |
 | M5 | OAuth completes in Claude Code | untested | Needs a human browser step |
+
+## Triggering and coexistence (lead checks, Claude Code 2.1.302)
+
+Each prompt ran as `claude -p` with the plugin loaded and only `Skill`, `Read`, `Grep`, `Glob` allowed; the table lists which skills the model loaded.
+
+| id | prompt kind | project | result |
+|---|---|---|---|
+| T1-T5 | Kernel tasks (screenshot function, Cloudflare blocks, keeping a login, 429s at 50 parallel pages, "still billing after close") | TS project using `@onkernel/sdk` | `kernel:kernel` loaded in 5 of 5 |
+| T6 | Linux kernel module null-deref fix | C kernel-module repo | no skill loaded |
+| T7 | Add zod validation | plain TS project | no skill loaded |
+| T8 | Why a Jupyter kernel restarts | plain TS project | no skill loaded |
+| T9-T10 | Kernel questions with hooks disabled (`KERNEL_PLUGIN_HOOKS=off`) in a project with no Kernel files | plain TS project | `kernel:kernel` loaded in 2 of 2 (the description alone triggers it) |
+| T11 | "Our run for Kernel browser session <id> failed. Why?" | TS project | `kernel:debug-session` loaded |
+| T12 | "Our agent needs to log in to app.example.com ... keep the session" | TS project | `kernel:kernel` then `kernel:login` loaded |
+| T13-T14 | Same screenshot and failed-session prompts with Kernel's official `kernel-cli` and `kernel-sdks` plugins also loaded | TS project | this plugin's `kernel:kernel` and `kernel:debug-session` were chosen; no official skill was loaded |
