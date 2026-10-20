@@ -307,3 +307,14 @@ Each prompt ran as `claude -p` with the plugin loaded and only `Skill`, `Read`, 
 | T11 | "Our run for Kernel browser session <id> failed. Why?" | TS project | `kernel:debug-session` loaded |
 | T12 | "Our agent needs to log in to app.example.com ... keep the session" | TS project | `kernel:kernel` then `kernel:login` loaded |
 | T13-T14 | Same screenshot and failed-session prompts with Kernel's official `kernel-cli` and `kernel-sdks` plugins also loaded | TS project | this plugin's `kernel:kernel` and `kernel:debug-session` were chosen; no official skill was loaded |
+
+## Workflow skills run end to end in Claude Code (lead checks, Claude Code 2.1.302, `--plugin-dir`)
+
+| id | skill and input | result |
+|---|---|---|
+| W1 | `/kernel:debug-session <id of a deleted session that failed on an HTTP 500 page>` | Report cited telemetry rows (`network_loading_failed` / `ERR_ABORTED` on the failing document), listed what it ruled out and what it did not check, made no live calls against the deleted session, left no temp files |
+| W2 | `/kernel:audit` on a copy of a project seeded with 8 known problems | 8 of 8 found with `file:line`, plus 3 extra low findings; the account block flagged an org-wide browser as "possibly not this project" and deleted nothing |
+| W3 | `/kernel:audit` on two projects written by the dogfood agents | 0 findings on both, with the rows it judged not applicable named; two uncertain items listed |
+| W4 | `/kernel:login the-internet.herokuapp.com` with the public demo account | Stored credential, connection `AUTHENTICATED` / `SUCCESS` with no person present, a fresh browser on the profile showed `/secure` with a logout link, then it deleted browser, connection, profile and credential and listed them empty |
+| W5 | `/kernel:profile-site https://quotes.toscrape.com` | Registry lookup `ok`; two headful browsers (stealth and normal, direct egress); the analyzer said "possible block page" for both while all four screenshots showed the normal site, and the report treated it as an analyzer false positive as the skill instructs; both browsers deleted |
+| W6 | `kernel-plugin detect .` from two different non-git projects | A relative `.` used to share one cache entry (the second project was told the first one's result). Fixed by resolving the directory to an absolute path; covered by a regression test |
