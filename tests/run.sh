@@ -110,10 +110,10 @@ if [ "$KP_HAVE_JQ" = 1 ]; then
 fi
 # QC pass: the redaction filter must stay linear on one long token (page-controlled text)
 if [ "$KP_HAVE_JQ" = 1 ]; then
-  LONGTOK="$(awk 'BEGIN { for (i = 0; i < 12000; i++) printf "a" }')"
+  LONGTOK="$(awk 'BEGIN { for (i = 0; i < 24000; i++) printf "a" }')"
   printf '{"events":[{"seq":1,"event":{"ts":1760000000000000,"type":"console_error","data":{"text":"%s"}}}]}' "$LONGTOK" > "$W/long.json"
   t0=$(date +%s); jq -r -f "$P/skills/debug-session/scripts/events.jq" "$W/long.json" >/dev/null 2>&1; t1=$(date +%s)
-  [ $((t1 - t0)) -lt 2 ] && ok "events.jq handles a 12 KB single token in under 2 s ($((t1 - t0)) s)" || bad "events.jq long-token cost" "$((t1 - t0)) s"
+  [ $((t1 - t0)) -lt 2 ] && ok "events.jq handles a 24 KB single token in under 2 s ($((t1 - t0)) s)" || bad "events.jq long-token cost" "$((t1 - t0)) s"
   jq -r -f "$P/skills/debug-session/scripts/events.jq" "$F/debug/events-secrets.json" | grep -q 'Cookie: \*\*\*' && ok "events.jq redacts a whole Cookie line" || bad "events.jq redacts a whole Cookie line" "not redacted"
 fi
 # create-credential.mjs refuses a cleartext base URL (it sends the key and the password)
