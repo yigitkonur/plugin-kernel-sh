@@ -8,14 +8,14 @@ disable-model-invocation: true
 
 # Diff two Kernel profiles
 
-Compare what two profiles actually contain, find the state that explains "works on A, fails on B", and report it without printing any value. The argument is the text after the skill name in the user's message (or the line starting ARGUMENTS:): `<profile-a> <profile-b> [issue]`. Profile A is the working baseline, B the broken one. If either profile is missing, ask for it. If the issue is missing, ask for it too: it decides which surfaces to weight.
+Compare what two profiles actually contain, find the state that explains "works on A, fails on B", and report it without printing any value. The argument is the text after the skill name in the user's message (or the line starting ARGUMENTS:): `<profile-a> <profile-b> [issue]`. Profile A is the working baseline, B the broken one. If either profile is missing, ask for it. If the issue is missing, do not ask: default to Cookies, Session Storage, Local Storage and Preferences and proceed.
 
 ## Rules
 
 - Never print cookie values, `Login Data` username/password columns, tokens, or storage values. Emit host, name, lengths, counts and presence only.
 - Never print API keys or any CDP / live-view / replay / hosted-login URL.
-- The extracted profile is sensitive. Put it in a new empty temp directory and remove it at the end.
-- Never run `kernel` commands that create or delete resources here. This skill only reads (`profiles get`, `profiles download`).
+- The extracted profile is sensitive. Put it in a new empty temp directory and remove it on every exit path (step 7).
+- Only read: `profiles get`, `profiles download`, `browsers list`. Never create or delete resources.
 - Do not dump file listings or diffs into the context. Summarize with counts, `head`, and `jq`.
 
 ## 1. Preflight
@@ -24,7 +24,7 @@ Compare what two profiles actually contain, find the state that explains "works 
    - `brew install kernel/tap/kernel`
    - `npm i -g @onkernel/cli`
 2. Run `command -v jq sqlite3`. `jq` is required. `sqlite3` is only needed for the cookie and `Login Data` steps; without it, skip those and say so in the report.
-3. If the user named a project, add `--project <id-or-name>` to every `kernel profiles` command below. Names and IDs resolve inside the CLI's active project.
+3. If the user named a project, add `--project <id-or-name>` to every `kernel profiles` and `kernel browsers` command below. Names and IDs resolve inside the CLI's active project.
 
 ## 2. Resolve both profiles
 
@@ -37,12 +37,14 @@ kernel profiles get "$B" -o json > diff/profile-b.json
 jq -r '[.id,.name,.created_at,.updated_at,.last_used_at] | @tsv' diff/profile-a.json diff/profile-b.json
 ```
 
-(Replace `$A` and `$B` with the two values from the user. `profiles get` flags are from the CLI source; the lab only ran the SDK form: unverified as a shell line.)
+(Replace `$A` and `$B` with the two values from the user. `profiles get` flags are from the CLI source; unverified as a shell line.)
 
 Shell state does not persist between Bash calls. Note the printed workdir path, and start every later block with `cd <that literal path>` and use the literal profile names in place of `$A` and `$B`. Do the same for cleanup.
 
+**On every stop after the download step (same id, 404, "no saved data", empty archive, any error), run the cleanup step (7) first, then report.**
+
 - If both resolve to the same `id`, stop and tell the user.
-- Compare `updated_at`. A profile is only written when a browser that had `save_changes: true` is deleted (lab P09, confirmed) or times out (docs; the lab tested deletion only). Closing a Playwright/CDP connection does not save it, so a stale `updated_at` on B often is the answer. Say so in the report.
+- Compare `updated_at`. A profile is only written when a browser that had `save_changes: true` is deleted or times out (docs). Closing a Playwright/CDP connection does not save it, so a stale `updated_at` on B often is the answer. Say so in the report.
 - If a get fails with 404, the name or project is wrong; stop and ask.
 
 ## 3. Download both
@@ -55,9 +57,9 @@ kernel profiles download "$B" --to b
 find a b -maxdepth 2 -type d | sort | head -40
 ```
 
-- `--to` is an extraction directory, not a filename. The CLI extracts for you; do not run `unzip`, `tar` or `zstd` (CLI source; lab P09: the default is a zstd tarball, not zip, and `kernel profiles download <name> --to <dir>` extracted a Chromium user-data layout, 151 files, SUCCESS).
+- `--to` is an extraction directory, not a filename. The CLI extracts for you; do not run `unzip`, `tar` or `zstd` (CLI source: the default is a zstd tarball, not zip, and it extracts a Chromium user-data layout).
 - Keep the default `--format tar.zst`. Use `--format tar` only if decompression fails.
-- If the CLI says the profile "has no saved data yet" (it prints this on HTTP 202 and still exits 0, so do not rely on exit status), stop: that profile was never saved. Tell the user to run a browser with `profile: { name, save_changes: true }` and delete the browser, then retry. (Lab P09 gotcha: the SDK returned a 0-byte archive for a never-saved profile with no error printed, HTTP status not captured, so also treat an empty `a/` or `b/` as "never saved".)
+- If the CLI says the profile "has no saved data yet" (it prints this on HTTP 202 and still exits 0, so do not rely on exit status), stop: that profile was never saved. Tell the user to run a browser with `profile: { name, save_changes: true }` and delete the browser, then retry. The SDK can also return a 0-byte archive with no error, so treat an empty `a/` or `b/` as "never saved".
 - Expect `Default/` (cookies, `Preferences`, `Local Storage`, `Session Storage`, `IndexedDB`, `Extensions`) and `Local State` at the top level. Use `find` for paths: newer Chrome keeps cookies in `Default/Network/Cookies`.
 
 ## 4. Pick surfaces from the issue
@@ -74,57 +76,51 @@ Do not compare everything. Start from this table; when in doubt use Cookies + Se
 | language, timezone, viewport | `Preferences`, `Secure Preferences` |
 | quota, offline data | Local Storage, IndexedDB, Service Worker |
 
-Skip `Cache/`, `Code Cache/`, `GPUCache/` and `Service Worker/CacheStorage/`: noise.
+For any surface without a block in step 5 (Secure Preferences, Local Extension Settings, IndexedDB, Service Worker), compare only file counts and `du -sk` sizes; never `cat` or `strings` it. Skip `Cache/`, `Code Cache/`, `GPUCache/` and `Service Worker/CacheStorage/`: noise.
 
 ## 5. Focused diffs
 
-Every block below starts with an `# untested` comment: the lab verified only the download (it counted 5 cookie rows on a probe profile but did not run these exact lines). Run only the ones the table selected.
+None of these blocks were run against a real profile (guard logic only on a synthetic file). Run only the ones the table selected.
 
-**Cookies** (select `length(encrypted_value)`, never `value`; modern Chrome encrypts the value and leaves `value` empty, per the Kernel profile-archive reference skill; not lab-verified):
+**Cookies** (select `length(encrypted_value)`, never `value`; modern Chrome encrypts the value and leaves `value` empty, per the Kernel profile-archive reference skill; untested):
 
 ```bash
-# untested
 for s in a b; do
   DB=$(find "$s" -name Cookies -not -name '*-journal' | head -1)
   [ -n "$DB" ] && sqlite3 "$DB" "SELECT host_key, name, length(encrypted_value), is_secure, is_httponly, samesite, expires_utc FROM cookies ORDER BY host_key, name;" > "diff/cookies-$s.txt"
 done
-diff diff/cookies-a.txt diff/cookies-b.txt | wc -l
 diff diff/cookies-a.txt diff/cookies-b.txt | head -40
 ```
 
-If the issue names a host, add `WHERE host_key LIKE '%<host>%'`. Flag these vendor cookie names when present on one side only: `_abck`, `bm_sz`, `bm_sv` (Akamai); `__cf_bm`, `cf_clearance` (Cloudflare); `datadome`; `_px*`, `pxvid` (HUMAN); `incap_ses_*`, `visid_incap_*`, `reese84` (Imperva). The SQL output contains names and lengths only.
+If the issue names a host, add `WHERE host_key LIKE '%<host>%'`, but only if `<host>` matches `^[A-Za-z0-9.-]+$`; otherwise skip the filter. Flag these vendor cookie names when present on one side only: `_abck`, `bm_sz`, `bm_sv` (Akamai); `__cf_bm`, `cf_clearance` (Cloudflare); `datadome`; `_px*`, `pxvid` (HUMAN); `incap_ses_*`, `visid_incap_*`, `reese84` (Imperva). The SQL output contains names and lengths only.
 
 **Preferences**:
-
 ```bash
-# untested
 for s in a b; do P=$(find "$s" -name Preferences -not -path '*/Extension*' | head -1); [ -n "$P" ] && jq -r '[paths(scalars) | map(tostring) | join(".")] | .[]' "$P" | sort > "diff/pref-keys-$s.txt"; done
-diff diff/pref-keys-a.txt diff/pref-keys-b.txt | wc -l
 diff diff/pref-keys-a.txt diff/pref-keys-b.txt | head -60
 ```
 
 Look at `intl.*`, `profile.default_content_setting_values`, `webrtc.*`, `extensions.settings`, `dns_over_https.*`. Preferences can hold identifiers; the diff above lists key paths only. To check a value, query one known non-sensitive path (for example `jq '.intl.accept_languages'`), never the whole file.
 
-**Local Storage and Session Storage** (LevelDB, read with `strings`, report key names and origin only, never values):
+**Local Storage and Session Storage** (LevelDB, read with `strings`, key names and origins only, never values). LevelDB stores a value right after its key, so a token can match the key pattern. Patterns are capped and a guard discards the whole file if any line is over 40 chars or token-shaped:
 
 ```bash
-# untested; first run on a probe profile with a known sessionStorage value and confirm the output is key names only (adjacent value bytes can match the key pattern)
+guard() { ! awk 'length>40 || /eyJ/ || /[A-Za-z0-9+\/_=-]{24,}/ {f=1} END{exit !f}' "$1"; }
 for s in a b; do
   SS=$(find "$s" -type d -name 'Session Storage' -not -path '*/Extension*' | head -1)
-  [ -n "$SS" ] && strings "$SS"/*.log "$SS"/*.ldb 2>/dev/null | grep -oE 'map-[0-9]+-[A-Za-z._0-9-]+' | sed -E 's/^map-[0-9]+-//' | sort -u > "diff/ss-keys-$s.txt"
+  [ -n "$SS" ] && strings "$SS"/*.log "$SS"/*.ldb 2>/dev/null | grep -oE 'map-[0-9]+-[A-Za-z._0-9-]{1,41}' | sed -E 's/^map-[0-9]+-//' | sort -u > "diff/ss-keys-$s.txt"
   LS=$(find "$s" -type d -name 'Local Storage' -not -path '*/Extension*' | head -1)
-  [ -n "$LS" ] && strings "$LS"/leveldb/*.log "$LS"/leveldb/*.ldb 2>/dev/null | grep -oE '^_https?://[^[:space:]^]+' | sort -u > "diff/ls-origins-$s.txt"
+  [ -n "$LS" ] && strings "$LS"/leveldb/*.log "$LS"/leveldb/*.ldb 2>/dev/null | grep -oE '^_https?://[A-Za-z0-9.-]{1,41}(:[0-9]{1,5})?' | sort -u > "diff/ls-origins-$s.txt"
 done
-diff diff/ss-keys-a.txt diff/ss-keys-b.txt | head -40
-diff diff/ls-origins-a.txt diff/ls-origins-b.txt | head -40
+for f in ss-keys-a ss-keys-b ls-origins-a ls-origins-b; do [ -f "diff/$f.txt" ] && ! guard "diff/$f.txt" && rm -f "diff/$f.txt" && echo "DISCARDED $f"; done
+[ -f diff/ss-keys-a.txt ] && [ -f diff/ss-keys-b.txt ] && diff diff/ss-keys-a.txt diff/ss-keys-b.txt | head -40
+[ -f diff/ls-origins-a.txt ] && [ -f diff/ls-origins-b.txt ] && diff diff/ls-origins-a.txt diff/ls-origins-b.txt | head -40
 ```
 
-`map-N` numbers differ between profiles and mean nothing; the `sed` strips them so only key names are compared. Look for auth-shaped keys missing on B (`authCookie`, `sessionGUID`, `*_token`, tenant or account GUIDs).
+If a file was discarded, show neither diff of that pair; report `Session Storage: not checked (value bytes adjacent)` (or `Local Storage: ...`) under "Not checked". `map-N` numbers differ between profiles and mean nothing; the `sed` strips them. Look for auth-shaped keys missing on B (`authCookie`, `sessionGUID`, `*_token`, tenant or account GUIDs).
 
 **Extensions and Login Data**:
-
 ```bash
-# untested
 for s in a b; do E=$(find "$s" -type d -name Extensions -not -path '*/Local Extension*' | head -1); [ -n "$E" ] && ls "$E" > "diff/ext-$s.txt"; done
 diff diff/ext-a.txt diff/ext-b.txt
 for s in a b; do L=$(find "$s" -name 'Login Data' -not -name '*-journal' | head -1); [ -n "$L" ] && sqlite3 "$L" "SELECT origin_url, length(username_value) > 0, length(password_value) FROM logins ORDER BY origin_url;" > "diff/logins-$s.txt"; done
@@ -133,36 +129,31 @@ diff diff/logins-a.txt diff/logins-b.txt | head -20
 
 Extension IDs are 32-char hashes; map an ID to a name through `Extensions/<id>/<version>/manifest.json` (`jq -r .name`). Print `origin_url` and lengths only.
 
-**Inventory** (catches missing databases):
-
-```bash
-# untested
-for s in a b; do (cd "$s" && find . -type f | sort) > "diff/files-$s.txt"; done
-diff diff/files-a.txt diff/files-b.txt | grep -v -E 'Cache|GPUCache' | wc -l
-diff diff/files-a.txt diff/files-b.txt | grep -v -E 'Cache|GPUCache' | head -30
-```
+**Inventory** (catches missing databases): `for s in a b; do (cd "$s" && find . -type f | sort) > "diff/files-$s.txt"; done; diff diff/files-a.txt diff/files-b.txt | grep -v -E 'Cache' | head -30`
 
 ## 6. Interpret
 
 Tie every difference to the issue; do not paste raw diffs. Likely causes, strongest first:
 
 - Auth cookie present on A, missing or short on B: session not established or evicted.
-- Cookies match but Session Storage auth keys are missing on B: B was saved before the SPA finished its post-login bootstrap (save-time race).
-- B's `updated_at` is old or equal to creation: the writer never deleted its browser, or ran without `save_changes: true`, so nothing was saved (lab P09, confirmed).
+- Session Storage auth keys missing on B while cookies match: B was saved before the SPA finished its post-login bootstrap.
+- B's `updated_at` is old or equal to creation: the writer never deleted its browser, or ran without `save_changes: true`, so nothing was saved.
 - Bot-vendor cookie only on A: A already cleared the challenge; B will be re-challenged.
 - `intl.*`, `webrtc.*` or `dns_over_https.*` differ: locale and fingerprint branches differ.
-- Extension on one side only: it can change page behavior.
-- Login Data row on A only: autofill will not fire on B.
-- Local Storage origin has keys on A only: site-managed session state (JWT, flags) will not apply.
-- IndexedDB for an auth origin (Firebase, Clerk) empty on B: SDK token cache is absent.
+- Extension or Login Data row on A only: page behavior or autofill differs on B.
+- Local Storage origin or IndexedDB auth origin (Firebase, Clerk) populated on A only: site session state is absent on B.
 
-Profiles are last-writer-wins (lab P09, confirmed for sequential writers): if two jobs share a profile with `save_changes: true`, the later deletion overwrites the earlier. Check this when B "lost" state A had. To find a live writer, run `kernel browsers list --status active -o json` and filter with `jq '.[] | select(.profile.id=="<id>") | {session_id, profile_save_changes}'` (untested field path; the lab confirmed `profile_save_changes` via the SDK `browsers.list({ status: 'active', query: <profile id> })`).
-
-Renaming a profile keeps its id and the old name stops resolving at once (lab P09, confirmed). If a script still uses the old name, that explains a 404 on one side.
+Profiles are last-writer-wins: if two jobs share a profile with `save_changes: true`, the later deletion overwrites the earlier. Check this when B "lost" state A had. To find a live writer, run `kernel browsers list --status active -o json` (add `--project` if one was named) and filter with `jq '.[] | select(.profile.id=="<id>") | {session_id, profile_save_changes}'` (untested field path). Renaming a profile keeps its id and the old name stops resolving at once. If a script still uses the old name, that explains a 404 on one side.
 
 ## 7. Cleanup
 
-Run `rm -rf <literal workdir path>` (the path printed in step 2; `$WORKDIR` is not set in a new Bash call, and an empty expansion removes nothing) unless the user asks to keep the data. If kept, tell them the path and that it may contain credentials.
+Run this with the literal workdir path printed in step 2 (`$WORKDIR` is not set in a new Bash call), unless the user asks to keep the data:
+
+```bash
+case "<literal workdir path>" in */profile-diff-*) rm -rf -- "<literal workdir path>";; esac
+```
+
+This runs on every stop after the download step, not only at the end. If kept, tell them the path and that it may contain credentials.
 
 ## Report format
 
@@ -191,3 +182,6 @@ Workspace: removed | kept at <path>
 ```
 
 Never include values, only names, counts and lengths.
+
+---
+Verified 2026-10-20 against SDK 0.128.0 / CLI 0.49.0; see verified-facts.md and ../kernel/references/profiles.md.
