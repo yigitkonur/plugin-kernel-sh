@@ -42,6 +42,13 @@ Authenticate the bundled Kernel MCP server once: run `/mcp`, pick `kernel`, and 
 
 **MCP server.** The hosted Kernel MCP server (`https://mcp.onkernel.com/mcp`) is bundled for management and quick checks by the coding agent (list and clean up browsers, search the docs, try a snippet). Your product code should call `@onkernel/sdk`, not the MCP.
 
+## Verification status
+
+- **Live probes.** 23 topic probes ran against a real Kernel account (SDK 0.128.0, CLI 0.49.0, 2026-10-20): 153 claims confirmed, 34 refuted (claims from earlier skills, the docs or sample code that did not hold up), 4 gated by plan and 11 unclear. Every row, with its evidence, is in [verified-facts.md](verified-facts.md).
+- **Naive-agent runs.** 24 realistic tasks (screenshots, scraping, logins, vault fill, parallel visits, pools, Apps, debugging a failed session, downloads, uploads, stealth, an audit, a Next.js route, leftover cleanup, one task that needs no browser) were given to agents that knew Kernel only from these files. The final text passed 23 of 23 tasks, and a final re-run of the 13 tasks whose guidance changed passed 13 of 13, with cleanup verified each time.
+- **Code.** All 70 TypeScript snippets in the skills type-check against the installed SDK; the hook and detection tests (333) pass under `sh`, `dash` and with GNU coreutils first in `PATH`; CI repeats them on Ubuntu and macOS.
+- **Not verified**, so the skills mark it "(unverified)" or "(untested)": the interactive OAuth sign-in to the bundled MCP server (the Bearer-key variant is verified), payments (Link, MPP, AgentCard), TOTP and captcha behavior beyond the lab sites, GPU browsers (plan-gated), the Kernel React component's props, and Windows.
+
 ## Privacy and safety
 
 - The plugin ships no secret and asks for none. The hooks make no network calls and never read the contents of `.env` files; they match names and one key pattern.
