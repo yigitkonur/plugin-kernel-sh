@@ -9,12 +9,13 @@ All code assumes `import Kernel from '@onkernel/sdk'` and `const kernel = new Ke
 | You have | Use | Why / trap |
 |---|---|---|
 | New code that knows what to do on a page | `kernel.browsers.playwright.execute` | Default. Runs in the VM, returns JSON, no connection to manage (section 2) |
-| A model looking at pixels, or a step selectors cannot do (canvas, drag, native dialog) | `kernel.browsers.computer.*` for that step only | Slower per step; DOM work (read text, goto, upload, cookies, tabs) stays on Playwright (section 4) |
+| A model looking at pixels, or a step selectors cannot do (canvas, drag, native dialog) | `kernel.browsers.computer.*` for that step only | Slower per step; DOM work (read text, goto, upload, cookies, tabs) stays on Playwright (section 2); computer details in section 4 |
 | The site registers structured tools for the action | `kernel.browsers.webmcp` | Only some sites do; most pages list nothing (section 5) |
 | An agent that writes helpers and reuses them across turns | `kernel.browsers.repl` | JavaScript only; a timeout wipes its state (section 6) |
 | An existing Playwright or Puppeteer suite | `chromium.connectOverCDP(cdp_ws_url)` | Not for new code (section 11) |
 | A binary, a script or a server in the VM | `kernel.browsers.process.*` | Section 7 |
-| Files in or out | `kernel.browsers.fs.*` | Section 8 |
+| Read files out of the VM (downloads) | `kernel.browsers.fs.*` | Section 8 |
+| Put a file into a page's `<input type=file>` | `setInputFiles` inside `playwright.execute` | Not `fs.*`: that only writes inside the VM (section 8) |
 | An HTTP call that must carry the browser's cookies and proxy | `kernel.browsers.curl` / `fetch` | Section 9 |
 
 **Avoid** running a whole task on screenshots, and mixing computer clicks with CDP `page.click` in one flow (they read differently in replays and logs). **Source** https://www.kernel.sh/docs/introduction/control, https://www.kernel.sh/docs/browsers/playwright-computer-use-fallback.
@@ -26,24 +27,66 @@ CLI equivalents exist for exploring: `kernel browsers playwright execute <id> '<
 **If** you are writing page automation -> **Do** send the code to the VM and read the result:
 
 ```ts
-const { data: res } = await kernel.browsers.playwright
-  .execute(id, {
+const res = await kernel.browsers.playwright.execute(
+  id,
+  {
     code: "await page.goto('https://example.com'); return await page.title();",
     timeout_sec: 30,
-  })
-  .withResponse();
+  },
+  { maxRetries: 0, timeout: 60_000 },
+);
 if (!res.success) throw new Error(`execute failed: ${res.error}`);
 console.log(res.result); // "Example Domain"
 ```
-(from lab P01 `pw-title.ts` / `pw-throw.ts`, ran ok)
+(from lab P01 `pw-title.ts` / `pw-throw.ts`, ran ok; the per-request options ran in dogfood)
 
 - A thrown error inside your code is HTTP 200 with `success: false`, plus `error`, `stderr` and `tab`. The SDK does not throw, so always branch on `success`.
 - In scope: `page`, `context`, `browser`, `webmcp`. `return` a JSON-serializable value. For bytes, return base64: `(await page.screenshot()).toString('base64')` round-tripped to a valid PNG (P01).
 - `await page.ariaSnapshot({ mode: 'ai' })` returns a YAML tree and `page.locator('body').ariaSnapshot()` works (P01). Docs say each `[ref=...]` can be reused as `page.locator('aria-ref=...')` in a later call (unverified: not run in the lab).
-- `timeout_sec`: API default 60, max 300. Docs suggest 5 s for a read and 10 s for a navigation; raise it for the specific slow step, not everywhere.
+- `await kernel.browsers.playwright.execute(...)` returns the body (`success`, `result`, `error`, ...). `.withResponse()` returns `{ data, response }` and adds the headers and HTTP status; use the plain `await` unless you need those.
+- `timeout_sec`: default 60 (installed types). Documented max 300; the types do not enforce it. Docs suggest 5 s for a read and 10 s for a navigation; raise it for the specific slow step, not everywhere.
 - State: the docs say "a fresh context each time", but `globalThis.x` set in one call was still there in the next call on the same executor (P03). Do not rely on either; return what you need and pass it back in the next call.
-- A `playwright.execute` call is not idempotent. For anything with side effects use `kernel.browsers.playwright.execute(id, params, { maxRetries: 0, timeout: <timeout_sec * 1000 + margin> })`. The SDK default is a 60 s request timeout with 2 retries, which cuts off a long call and re-sends it (default from the SDK source; the `{ maxRetries: 0 }` example is in https://www.kernel.sh/docs/browsers/playwright-execution). `// untested` as a combined call; each option is a documented per-request option.
+- A `playwright.execute` call is not idempotent. For anything with side effects use `kernel.browsers.playwright.execute(id, params, { maxRetries: 0, timeout: <timeout_sec * 1000 + margin> })`. The SDK default is a 60 s request timeout with 2 retries, which cuts off a long call and re-sends it (default from the SDK source; the `{ maxRetries: 0 }` example is in https://www.kernel.sh/docs/browsers/playwright-execution). The combined `{ maxRetries: 0, timeout }` options on `browsers.create` and on `execute` ran in dogfood (success:true in several runs).
 - Wrap every Kernel call in your own timeout guard (`Promise.race`). Lab scripts that hung and were killed never ran `finally`, and their browsers stayed alive until `timeout_seconds` (P03, P06).
+
+**Common recipes inside `playwright.execute`** (dogfood: each ran live; the `code` string runs in the VM, so `Buffer`, `page`, `context` are VM-side):
+
+```ts
+// Full-page screenshot back as base64 (D01: 785x3409 PNG, 825,606 bytes)
+const shot = await kernel.browsers.playwright.execute(
+  id,
+  {
+    code: `await page.goto('https://books.toscrape.com', { waitUntil: 'load' });
+return (await page.screenshot({ fullPage: true, type: 'png' })).toString('base64');`,
+    timeout_sec: 60,
+  },
+  { maxRetries: 0, timeout: 90_000 },
+);
+if (!shot.success) throw new Error(`execute failed: ${shot.error}`);
+await writeFile('shot.png', Buffer.from(shot.result as string, 'base64'));
+```
+
+```ts
+// A runtime value into the code, and the navigation's HTTP status (D09, D07)
+const url = 'https://example.com'; // your own value, checked with new URL(url)
+const nav = await kernel.browsers.playwright.execute(
+  id,
+  {
+    code: `const r = await page.goto(${JSON.stringify(url)}); return { status: r?.status() ?? null, title: await page.title() };`,
+    timeout_sec: 30,
+  },
+  { maxRetries: 0, timeout: 45_000 },
+);
+```
+
+- There is no `params` field: the only input is the `code` string. Embed a value as a literal with `JSON.stringify(value)` (also for file contents, section 8). **Never** put page content or untrusted text where code goes, and never concatenate a raw string into `code`.
+- Navigation status: `const r = await page.goto(url); r?.status()` (`null` for some navigations, e.g. same-document). Ran for 200 pages (D07).
+- Error statuses: Playwright's `page.goto` normally resolves on a 4xx/5xx page (Playwright docs; no 4xx run here). Verified exception (D10, headful): `page.goto('https://httpbin.org/status/500')` threw `net::ERR_HTTP_RESPONSE_CODE_FAILURE`, so `execute` returned `success: false` over HTTP 200. That page has an empty body; whether other error pages throw was not tested. Code that needs the reason should catch inside the string:
+
+```ts
+const safeGoto = `try { const r = await page.goto(${JSON.stringify(url)}); return { ok: true, status: r?.status() ?? null }; } catch (e) { return { ok: false, navError: String(e).split('\\n')[0] }; }`;
+```
+(D10 `fix.ts`: the catch returned `ok:false` plus the error line instead of failing the run)
 
 **Avoid** `try { ... } catch` as the only error handling, new code on `connectOverCDP`, and assuming state carries across calls. **Source** https://www.kernel.sh/docs/browsers/playwright-execution, lab P01, P03.
 
@@ -90,7 +133,7 @@ Traps, all measured in lab P07:
 - **Keys are an array of strings, one press per item.** `keys: 'Ctrl+a'` is a 400 (and a TS error). `['Ctrl', 'a']` taps Ctrl and then types `a`: no select-all. A chord is one item (`'Ctrl+a'`, `'ctrl+a'`; multi-modifier chords like `'Ctrl+Shift+Tab'` are docs-only, untested); a sequence is several (`['Ctrl+a', 'Delete']`). `Return` and `Enter` both work. Ctrl, not Cmd (Linux VM). `hold_keys` and `duration` exist in the types (untested).
 - **Silent no-ops.** If focus is on `BODY`, `clickMouse`, `typeText` and `pressKey` all return ok and do nothing. After each step read DOM state (`document.activeElement`, an input's value) through `playwright.execute`.
 - **Coordinates are screen pixels, not page pixels.** Headful 1920x1080: page y = screen y - 87. The `outerHeight - innerHeight` guess (57) lands 30 px high. Calibrate once: add a `mousedown` listener, click, and compare `clientX/Y` with `screenX/Y`.
-- `typeText` is typed as `{ text, delay? }` only. The live API also accepted `smooth: false` and `typo_chance` (HTTP 200), but SDK 0.127.0 types reject them (TS2353), so they need a cast: `{ text, smooth: false } as any` (untested for effect; only acceptance was checked). Docs: `delay` applies only when `smooth` is false. The REST path is `/computer/type`.
+- `typeText` is typed as `{ text, delay? }` only. The live API also accepted `smooth: false` and `typo_chance` (HTTP 200), but the SDK types reject them (TS2353), so they need a cast: `{ text, smooth: false } as any` (untested for effect; only acceptance was checked). Docs: `delay` applies only when `smooth` is false. The REST path is `/computer/type`.
 - Computer calls return ok on a headless browser too (screenshot, click, key); whether the click or key changed the page there was not checked.
 - Cap attempts per risky Playwright tool, then hand over; do not loop both surfaces on one step. Hand-off patterns: https://www.kernel.sh/docs/browsers/playwright-computer-use-fallback.
 - Docs claim computer controls leave no CDP fingerprint (https://www.kernel.sh/docs/introduction/control). Site-specific and not tested here; test on the target before committing.
@@ -168,6 +211,13 @@ for await (const c of stream) console.log(c.stream ?? c.event, c.exit_code ?? de
 
 ## 8. Files: downloads and uploads
 
+**If** you need a file from a direct URL -> **Do** this first, the easiest route: `browsers.curl` with `response_encoding: 'base64'`, then decode locally (P05-b confirmed):
+
+```ts
+const r = await kernel.browsers.curl(id, { url: 'https://example.com/file.bin', response_encoding: 'base64', timeout_ms: 30000 });
+const bytes = Buffer.from(r.body, 'base64'); // r.status is the HTTP status
+```
+
 **If** a click downloads a file -> **Do** click with no download setup, poll the default folder, read the bytes **before** you delete the browser:
 
 ```ts
@@ -183,22 +233,39 @@ const bytes = Buffer.from(await resp.arrayBuffer());
 ```
 (poll and read from lab P05-b `lib.ts`, ran ok; the click there was a `puppeteer-core` `page.click`, a 36-byte file appeared. A plain `playwright-core` click on the same flow was not re-run clean: untested)
 
+- **Bytes from inside the VM to your machine.** `fs.readFile` (above) for files on the VM disk. For bytes you already hold in `playwright.execute` code, return them as base64 in `result` (D12 ran: `const resp = await context.request.get(href); const body = await resp.body(); return { status: resp.status(), base64: body.toString('base64') }`, then `Buffer.from(out.base64, 'base64')` locally, 36 bytes). No size limit is documented or measured here; large files: use `fs.readFile`. Take the file name from the page only through `path.basename`, and refuse `''`, `.` and `..`.
 - **Never `fs.createDirectory` the download folder.** It makes root-owned directories (`mode` has no visible effect); Chromium runs as user `kernel`, cannot write there, and cancels the download. Symptom: the folder stays empty, `listFiles` returns null. In-VM `download.saveAs(...)` also failed with "canceled".
 - Default folder `/home/kernel/Downloads` does not exist until Chromium makes it; a missing folder throws 404 "directory not found". An empty existing folder returns `null`, not `[]`: use `?? []`.
 - A custom folder works only if user `kernel` owns it: `process.exec(id, { command: 'sh', args: ['-c', 'mkdir -p /tmp/dl'], as_user: 'kernel' })`, then raw CDP `Browser.setDownloadBehavior { behavior: 'allow', downloadPath, eventsEnabled: true }` from a CDP client (confirmed with `puppeteer-core`). Programmatic (script-triggered) downloads need that `allow` behavior (docs).
-- If the file has a direct URL, the most robust path is `browsers.curl(id, { url, response_encoding: 'base64' })` and `Buffer.from(body, 'base64')` (P05-b, confirmed).
 - `.crdownload` marks an in-progress file (docs); not observed for the 36-byte test.
-- **If** a page needs an upload -> **Do** `setInputFiles` with an in-memory buffer (confirmed, P05 `p05-upload.ts`):
+
+**If** a page needs an upload (a file into an `<input type=file>`) -> **Do** `setInputFiles` inside `playwright.execute`, not `fs.*`. The browser runs in the VM, so a local path means nothing there: embed the file contents in the `code` string with `JSON.stringify` and pass an in-memory buffer (D13 ran this, and P05 `p05-upload.ts` confirmed the call):
 
 ```ts
+import { readFileSync } from 'node:fs';
+const content = readFileSync('./upload.txt', 'utf8'); // text files; your own file
+const up = await kernel.browsers.playwright.execute(
+  id,
+  {
+    code: `
+await page.goto('https://the-internet.herokuapp.com/upload', { waitUntil: 'domcontentloaded' });
 await page.locator('#file-upload').setInputFiles([
-  { name: 'a.txt', mimeType: 'text/plain', buffer: Buffer.from('hello\n') },
+  { name: 'upload.txt', mimeType: 'text/plain', buffer: Buffer.from(${JSON.stringify(content)}) },
 ]);
+await page.locator('#file-submit').click();
+await page.waitForSelector('#uploaded-files', { timeout: 15000 });
+return (await page.locator('#uploaded-files').textContent())?.trim();`,
+    timeout_sec: 60,
+  },
+  { maxRetries: 0, timeout: 90_000 },
+);
+if (!up.success) throw new Error(`execute failed: ${up.error}`);
 ```
 
+- Binary or large uploads: send `content.toString('base64')` and decode with `Buffer.from(b64, 'base64')` in the code (untested), or write the file into the VM with `fs.writeFile` and pass its VM path to `setInputFiles` (untested). The code string has no documented size limit.
 - After `deleteByID`, `readFile` throws with `e.status === 410` ("browser session no longer exists"). Pull files first; other `fs.*` calls after delete were not tried. Other `fs` methods (types): `writeFile`, `upload`, `uploadZip`, `downloadDirZip`, `fileInfo`, `move`, `deleteFile`, `watch.*`; untested.
 
-**Avoid** `createDirectory` for downloads, `saveAs`, and reading after delete. **Source** https://www.kernel.sh/docs/browsers/file-io (the `setDownloadBehavior` recipe), https://www.kernel.sh/docs/api-reference/browser-filesystem/create-a-new-directory (`createDirectory`; lab P05-b shows it breaks downloads), lab P05, P05-b.
+**Avoid** `createDirectory` for downloads, `saveAs`, `fs.*` for page uploads, and reading after delete. **Source** https://www.kernel.sh/docs/browsers/file-io (the `setDownloadBehavior` recipe), https://www.kernel.sh/docs/api-reference/browser-filesystem/create-a-new-directory (`createDirectory`; lab P05-b shows it breaks downloads), lab P05, P05-b, dogfood D12, D13.
 
 ## 9. HTTP through the browser: curl and fetch
 
@@ -225,19 +292,25 @@ console.log(await f.text());
 
 ## 11. Existing Playwright or Puppeteer code (CDP)
 
-**If** you are porting a suite that already speaks Playwright or Puppeteer -> **Do**:
+**If** you are porting a suite that already speaks Playwright or Puppeteer -> **Do** make the least change: create a Kernel browser, `connectOverCDP`, use the default context, and delete in `finally`:
 
 ```ts
 import { chromium } from 'playwright-core';
-const pw = await chromium.connectOverCDP(browser.cdp_ws_url);
-const context = pw.contexts()[0];
-const page = context.pages()[0] ?? (await context.newPage());
-// ... run the suite ...
-await pw.close();                                  // disconnects only
-await kernel.browsers.deleteByID(browser.session_id);
+const browser = await kernel.browsers.create({ headless: true, timeout_seconds: 120 }, { maxRetries: 0 });
+try {
+  const pw = await chromium.connectOverCDP(browser.cdp_ws_url);
+  const context = pw.contexts()[0];
+  const page = context.pages()[0] ?? (await context.newPage());
+  // ... the unchanged suite body, using page ...
+  await pw.close();                                // disconnects only
+} finally {
+  await kernel.browsers.deleteByID(browser.session_id);
+}
 ```
-(P02 `01-cdp-basics.ts`, P05 `p05-upload.ts`, ran ok)
+(P02 `01-cdp-basics.ts`, P05 `p05-upload.ts`; D15 ran the try/finally form: a local `chromium.launch` script ported with this diff returned the same 3 titles)
 
+- The diff against a local script: `chromium.launch({ headless })` becomes `kernel.browsers.create(...)` plus `connectOverCDP(browser.cdp_ws_url)`; `browser.newPage()` / `newContext()` becomes `contexts()[0]` / `pages()[0]`; `browser.close()` becomes `pw.close()` plus `deleteByID` in `finally`.
+- Headless vs headful: `chromium.launch` is headless by default, Kernel `browsers.create` is headful (`headless` defaults to false). D15 kept `headless: true` to match the original unwatched script; drop it if a person may watch or the site needs a headful browser (`references/browsers.md`).
 - A fresh browser has one context and one page. `pw.newContext()` is isolated from `contexts()[0]` (a cookie set in the default context was invisible there); reuse the default context. (That extensions and profile state live only there is an assertion, not tested.)
 - `pw.close()` disconnects. The browser stays listed active and keeps its slot (P02) until `deleteByID` or its timeout.
 - Docs name this a last resort: it adds a protocol fingerprint and a network hop. Move hot paths to `playwright.execute` (https://www.kernel.sh/docs/introduction/control).
@@ -254,4 +327,4 @@ These are docs-only notes, so each bullet gives the situation, the step and its 
 
 ---
 
-> Verified in lab: 2026-10-20 (cards P01, P02, P03, P03-b, P05, P05-b, P06, P07, P08, P20), labs ran on @onkernel/sdk 0.127.0 (current pin 0.128.0; the `typeText` note still holds), kernel CLI 0.49.0. Probes: P20 confirmed (CLI `playwright execute`, `computer screenshot`); P01 confirmed (execute shape, success:false, base64 screenshot, aria snapshot); P02 confirmed (CDP basics, close vs delete, reconnect, reap; standby field unclear); P03 and P03-b confirmed (concurrency, 8-executor limit and 409 only with `memory: '4GiB'`, delete and reuse); P05 partly confirmed (upload, 410 after delete; download unclear, `.crdownload` unseen); P05-b confirmed (download, root-owned-folder cause); P06 partly confirmed (exec, spawn, curl cookie jar; big-response `fetch` refuted/untested, 2 MB POST fails 502); P07 confirmed (key forms, offsets, REPL persistence and timeout; smooth/typo_chance acceptance only); P08 confirmed (statuses completed/error/awaiting_submission, stale-ref 404, field names). Not tested: `computer.batch`, `hold_keys`/`duration`, `scroll`/`dragMouse`/clipboard, headless click effects, REPL `timeout_sec` bounds and built-in helpers, WebMCP `canceled`/504/`customTools.remove`, `aria-ref` locators, executors on headful or 2 GiB, ~1 h CDP socket life, SSH, private networking, WebDriver BiDi, `playwright-core` click download, `fs` methods other than `listFiles`/`readFile`/`createDirectory`.
+> Verified in lab 2026-10-20 on @onkernel/sdk 0.127.0; types re-checked on 0.128.0; recipes marked (dogfood) ran in a second, independent run.

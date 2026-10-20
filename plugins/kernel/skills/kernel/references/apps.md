@@ -20,12 +20,11 @@ Vocabulary you need: an App is deployed code, an action is one registered entry 
 **Avoid**:
 - Browsers created without `invocation_id`: stopping the run cannot find them (S12).
 - Logging `browser_live_view_url`, cookies or keys with `console.log`: action logs persist with the app's logs (the scaffolded sample does log the live-view URL; strip it).
-- Shipping the scaffold unedited: it hardcodes `kernel.app("ts-basic")` in code and docs, and its `create-browser-for-testing` action uses `timeout_seconds: 3600`. Rename the app and remove that action before the first deploy.
+- Shipping the scaffold unedited: it hardcodes `kernel.app("ts-basic")` in code and docs, leaves `"name": "ts-basic"` in `package.json`, prints a "Next steps" block that says `kernel invoke ts-basic get-page-title`, pins an old `@onkernel/sdk` (`^0.23.0` in the dogfood run), and its `create-browser-for-testing` action uses `timeout_seconds: 3600`. After scaffolding run `npm i @onkernel/sdk@latest` (or your package manager's equivalent), rename the app in `index.ts`, `package.json` and your invoke command, and remove that action before the first deploy.
 
 ```ts
-// Trimmed from lab-runs/P17/app/index.ts (deployed and invoked, ran_ok)
+// (dogfood) deployed and invoked, ran OK; browser driven with playwright.execute, not connectOverCDP
 import { Kernel, type KernelContext } from "@onkernel/sdk";
-import { chromium } from "playwright-core";
 
 const kernel = new Kernel();
 const app = kernel.app("my-app"); // rename: the scaffold says ts-basic
@@ -34,19 +33,30 @@ app.action<{ url: string }, { title: string }>(
   "get-page-title",
   async (ctx: KernelContext, payload?: { url: string }) => {
     if (!payload?.url) throw new Error("URL is required");
-    const kb = await kernel.browsers.create({
-      invocation_id: ctx.invocation_id,
-      timeout_seconds: 300,
-      tags: { app: "my-app" },
-    });
-    const browser = await chromium.connectOverCDP(kb.cdp_ws_url);
-    const context = browser.contexts()[0] || (await browser.newContext());
-    const page = context.pages()[0] || (await context.newPage());
+    new URL(payload.url); // throws on an invalid URL
+    const browser = await kernel.browsers.create(
+      {
+        invocation_id: ctx.invocation_id,
+        headless: true,
+        timeout_seconds: 120,
+        tags: { app: "my-app", run: ctx.invocation_id },
+      },
+      { maxRetries: 0, timeout: 60_000 },
+    );
     try {
-      await page.goto(payload.url);
-      return { title: await page.title() };
+      const res = await kernel.browsers.playwright.execute(
+        browser.session_id,
+        {
+          // execute has no params field: put the runtime value in the code string with JSON.stringify
+          code: `await page.goto(${JSON.stringify(payload.url)}); return await page.title();`,
+          timeout_sec: 60,
+        },
+        { maxRetries: 0, timeout: 90_000 },
+      );
+      if (!res.success) throw new Error(`execute failed: ${String(res.error)}`);
+      return { title: String(res.result) };
     } finally {
-      await kernel.browsers.deleteByID(kb.session_id);
+      await kernel.browsers.deleteByID(browser.session_id);
     }
   },
 );
@@ -54,7 +64,7 @@ app.action<{ url: string }, { title: string }>(
 
 Inside an action, `new Kernel()` just works: Kernel injects a per-deployment `KERNEL_API_KEY` (S10).
 
-**Source** https://www.kernel.sh/docs/apps/develop, probe P17.
+**Source** https://www.kernel.sh/docs/apps/develop, probe P17, dogfood D09.
 
 ## S10. Deploy
 
@@ -197,4 +207,4 @@ kernel app history my-app -o json      # lab: []
 
 ---
 
-> Verified in lab: 2026-10-20, kernel CLI 0.49.0 (the SDK version the probes ran with was not recorded). Probes: P17 confirmed (scaffold with `kernel create -y`, deploy `-o json`, `--sync` and blocking CLI invoke, SDK async create + follow + retrieve, reserved `KERNEL_API_KEY` ignored, cleanup), P17 refuted (invoke without `-v`, `update(failed)` reaping within 10 s, 64 KB payload limit via `-f`, subdirectory entrypoint, `logs --since` without `-i`, "CLI returns immediately"). NOT tested: 4.5 MB payload, inline `-p` at size, `kernel logs --follow`, `follow` with `since`, reaping after more than 10 s, a working subdirectory layout or `deployments.create` with `entrypoint_rel_path`, `deploy github`, `--force` and duplicate-version behavior, sync SDK invoke past 100 s, `kernel invoke update|browsers|delete-browsers|history`, Ctrl+C cancel, `--env-file`.
+> Verified in lab 2026-10-20 on @onkernel/sdk 0.127.0; types re-checked on 0.128.0; snippets marked (dogfood) ran in an independent second run. kernel CLI 0.49.0. Probes: P17 confirmed (scaffold with `kernel create -y`, deploy `-o json`, `--sync` and blocking CLI invoke, SDK async create + follow + retrieve, reserved `KERNEL_API_KEY` ignored, cleanup), P17 refuted (invoke without `-v`, `update(failed)` reaping within 10 s, 64 KB payload limit via `-f`, subdirectory entrypoint, `logs --since` without `-i`, "CLI returns immediately"). NOT tested: 4.5 MB payload, inline `-p` at size, `kernel logs --follow`, `follow` with `since`, reaping after more than 10 s, a working subdirectory layout or `deployments.create` with `entrypoint_rel_path`, `deploy github`, `--force` and duplicate-version behavior, sync SDK invoke past 100 s, `kernel invoke update|browsers|delete-browsers|history`, Ctrl+C cancel, `--env-file`.

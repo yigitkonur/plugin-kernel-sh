@@ -10,6 +10,8 @@ disable-model-invocation: true
 
 You are measuring how one website treats a Kernel stealth browser and a normal Kernel browser on the same network, naming the anti-bot vendors it uses, and recommending a Kernel configuration. Read-only toward the site (two page loads per browser: home page and a login page the analyzer finds, plus up to seven HEAD requests to common login paths when no login link is found). Creates two billable headful browsers (about $0.48/hour each, so roughly a few cents for ~5 minutes); you delete both before you finish.
 
+Use it for a real target. A fingerprint test page such as bot.sannysoft.com cannot tell the modes apart: in the dogfood run it gave 57 per-check results, all passing and identical in stealth and normal.
+
 The argument is the text after the skill name in the user's message (or the line starting `ARGUMENTS:`). It is a URL or hostname. If it is missing, ask for it and stop. Normalize a bare hostname to `https://<host>/`. Refuse and ask again if the URL has credentials, tokens, signed query strings, a path whose GET triggers an action, or any of `'`, `;`, `$`, a backtick or whitespace (the URL is written into a shell state file and a command). Only profile public sites the user is allowed to test (https://www.kernel.sh/docs/config-registry).
 
 Rules for the whole run:
@@ -45,7 +47,7 @@ CODE=$(printf '%s\n' "$RESP" | tail -n 1); echo "registry status $CODE"
 ```
 
 Read the status first. On anything other than 200 (or a curl error), skip this step and put `lookup failed <status>, skipped` in the report. On 200:
-- `type: "recommendation"`: keep `browser` and `proxy_mode` for step 8 and compare them with the measured result. `proxy_mode: "managed"` means the recommendation needs a managed proxy created once and reused.
+- `type: "recommendation"`: keep `browser` and `proxy_mode` for step 8 and compare them with the measured result. `proxy_mode: "managed"` means the recommendation needs a managed proxy created once and reused. This skill does not create it (it runs both browsers on direct egress); to create or find it, follow `../kernel/references/unblock.md` section 5, "a dedicated ISP proxy / managed proxy" (`kernel.proxies.create({ type: 'isp', name })`, then `kernel.proxies.check(id)`, then `kernel.browsers.create({ proxy: { id } })`; look the proxy up by name before creating another). Treat `guidance` text that names unrelated CDNs as generic, not as a finding about this target.
 - `type: null` (no answer): the site is not necessarily unreachable. Do not call `resolve` unless the user asks (it runs several minutes in the background); this skill's own measurement is the evidence.
 - `type: "no_recommendation"`: print `code` (`proxy_restricted`, `target_not_evaluable`, `no_working_configuration`, `inconclusive`) and `guidance`.
 
@@ -67,7 +69,7 @@ If `npm ci` fails or the URL does not parse, report it and stop (nothing is crea
 
 ## 4. Create both browsers on the same network
 
-Default design, "both direct": both browsers leave through Kernel's direct egress, so the only difference is stealth. Without this, stealth uses the shared ISP proxy and normal goes direct, so the test measures stealth plus proxy against normal plus direct (different egress IPs). Do not use `kernel browsers update --disable-default-proxy` for this (deprecated; the create-time form did not give direct egress in testing). Every browser is tagged `run=<work dir name>` so cleanup touches only these. Run now:
+Concurrency: from step 1 `org limits`, if free concurrent browser slots are below 3, use the sequential variant: run the stealth create block, step 5 for stealth, delete it (step 7 loop), then only the normal create line, step 5 for normal, and step 7 again, recording each id in `state.env` as it is created. It keeps the comparison fair on the same network and never has two billable browsers alive at once. Otherwise create both up front as below. Default design, "both direct": both browsers leave through Kernel's direct egress, so the only difference is stealth. Without this, stealth uses the shared ISP proxy and normal goes direct, so the test measures stealth plus proxy against normal plus direct (different egress IPs). Do not use `kernel browsers update --disable-default-proxy` for this (deprecated; the create-time form did not give direct egress in testing). Every browser is tagged `run=<work dir name>` so cleanup touches only these. Run now:
 
 ```bash
 source "$W/state.env"
@@ -83,7 +85,7 @@ source "$W/state.env"
 for id in "$STEALTH_ID" "${NORMAL_ID:-}"; do [ -n "$id" ] && kernel browsers get "$id" -o json | jq '{session_id,stealth,headless,proxy,tags}'; done
 ```
 
-If the stealth create fails (empty `STEALTH_ID`), the normal browser is not created: go to step 7, then report. Both browsers are headful (the default); defended sites flag headless. Check the printed records. Stealth must show `"stealth": true` and `"proxy": {"mode": "direct"}`; normal must show `"stealth": false` and `"proxy": {"mode": "direct"}`. If stealth shows `{"mode": "default"}`, go to step 7, then tell the user the fair comparison was not possible and offer the "platform defaults" design below. (`--stealth` with `--proxy-mode direct` is not verified live.)
+If the stealth create fails (empty `STEALTH_ID`), the normal browser is not created: go to step 7, then report. Both browsers are headful (the default); defended sites flag headless. Check the printed records. Stealth must show `"stealth": true` and `"proxy": {"mode": "direct"}`; normal must show `"stealth": false` and `"proxy": {"mode": "direct"}`. If stealth shows `{"mode": "default"}`, go to step 7, then tell the user the fair comparison was not possible and offer the "platform defaults" design below. (Dogfood run: the session record showed `stealth: true` with `proxy.mode: direct`.)
 
 Other designs, only if the user asks (name the one used in the report): "platform defaults" omits `--proxy-mode direct` on the stealth create and the result is "stealth + default proxy", never stealth alone; "same explicit proxy" adds `--proxy-id <ID>` instead of `--proxy-mode` to both creates (rotation can still change the exit IP).
 
@@ -116,6 +118,8 @@ for m in stealth normal; do
   jq -r '.vendorDetections | to_entries[] | "\(.key): \([.value.products[].product] | unique | join(", "))"' "$R"
 done
 ```
+
+A `BLOCKED` verdict from the analyzer is a heuristic: confirm it by looking at the saved screenshot (`$W/output/$HOST/<mode>/screenshot-*.png`) before acting on it. Identical `BLOCKED` verdicts in both modes with a normal-looking page is an analyzer false positive, not a block. Example: bot.sannysoft.com gave `BLOCKED - login (Possible Block Page)` at medium confidence in both modes while the screenshot showed an ordinary test form; escalating from that would have been wrong. Report such a result as "analyzer verdict blocked, screenshot shows normal page, treated as not blocked" and use the no-block rows below.
 
 ## 7. Cleanup (always run, even after a failure)
 
@@ -163,7 +167,7 @@ try {
 ## Limits to state in the report
 
 - Each mode ran once, through one egress IP, so a single "blocked" can be IP reputation.
-- The analyzer checks the home page and one login page it discovers, not your actual flow (login pages are usually stricter); absence of a detected vendor is not proof of absence. Fingerprint test pages such as bot.sannysoft.com gave no usable result.
+- The analyzer checks the home page and one login page it discovers, not your actual flow (login pages are usually stricter); absence of a detected vendor is not proof of absence. Fingerprint test pages such as bot.sannysoft.com pass every check in both modes, so they show nothing about stealth.
 
 ## Output format
 
@@ -187,4 +191,4 @@ Not verified: <list anything skipped or failed>
 ```
 
 > Checked 2026-10-20 against @onkernel/sdk 0.128.0 and kernel CLI 0.49.0.
-> Not run live: the analyzer, `--stealth` with `--proxy-mode direct`, the curl form of `lookup`. See verified-facts.md.
+> Run live in the dogfood run: the analyzer, `--stealth` with `--proxy-mode direct`, the curl form of `lookup`. Details in the plugin repository's verified-facts.md.

@@ -7,7 +7,7 @@ Read this before you write `kernel.browsers.create(...)`. Every choice below is 
 **If** a human may watch (live view), you record a replay, or the target site defends itself -> **Do** keep the default (headful). **If** the work is unwatched, undefended and high-volume -> **Do** `headless: true`. -> **Avoid** headless for anything you will need to debug visually: it has no live view and no replays, and some bot detectors spot it. -> **Source** https://www.kernel.sh/docs/browsers/headless
 
 - Headless is lighter (1 GiB default vs 8 GiB) and cheaper. Per the pricing page, headful costs about 8x headless and a GPU headful browser about 48x headless (per-second rates, not re-measured). -> https://www.kernel.sh/docs/info/pricing
-- Lab: a headless create response carried no `browser_live_view_url`. A headful create was not run for this field (unverified: read the field and handle `undefined`; the SDK type marks it optional).
+- Lab (P18): a headful create returns `browser_live_view_url`; a headless create omits it. The SDK type marks it optional, so handle `undefined`.
 
 ```ts
 import Kernel from '@onkernel/sdk';
@@ -103,7 +103,7 @@ For new code prefer `playwright.execute` over CDP (`references/control.md`). If 
 **If** automation code or viewers sit far from us-east -> **Do** set `region` at create (`'us-east' | 'us-west' | 'eu-west' | 'ap-southeast'` in the SDK type; the docs list the first, third and fourth; non-default regions need an eligible plan). **Avoid** treating it as data residency or changing it later: it is fixed at create, create a new browser instead. -> **Source** https://www.kernel.sh/docs/browsers/regions, SDK types (untested in lab; `region` came back in the create response)
 
 - Default is us-east. Regions cover CPU browsers, pools and Managed Auth; GPU, Apps and invocations are not covered yet.
-- SDK 0.128.0 adds `location` (`locale`, `timezone`) on create. Live (SDK version of that run not recorded; the lab pinned 0.127.0): the default response carries `locale_source: 'metro'` and the page matches; setting an override returned 400 "browser location is not enabled for this organization" (org-gated, not visible in entitlements). Source: probe LEAD location.
+- SDK 0.128.0 adds `location` (`locale`, `timezone`) on create. Live (SDK version of that run not recorded; the lab pinned 0.127.0): the default response carries `locale_source: 'metro'` and the page matches; setting an override returned 400 "browser location is not enabled for this organization" (org-gated, not visible in entitlements). Source: probe LEAD location. The default location already matches a normal human user (timezone and locale come from the browser's region metro); an override is org-gated.
 
 ## B10. Create speed
 
@@ -111,7 +111,7 @@ For new code prefer `playwright.execute` over CDP (`references/control.md`). If 
 
 ## B11. Live view URL
 
-**If** the agent must show the user the browser, or let them step in -> **Do** read `browser_live_view_url` from a headful create and hand it to the user over a trusted channel; append `?readOnly=true` for a watch-only view (docs). **Avoid** logging it, committing it or putting it in a frontend bundle: it is a credential, and it dies when the browser is deleted or times out. -> **Source** https://www.kernel.sh/docs/browsers/live-view (headful URL and `readOnly` untested in lab)
+**If** the agent must show the user the browser, or let them step in -> **Do** read `browser_live_view_url` from a headful create and hand it to the user over a trusted channel; append `?readOnly=true` for a watch-only view (docs). **Avoid** logging it, committing it or putting it in a frontend bundle: it is a credential, and it dies when the browser is deleted or times out. -> **Source** https://www.kernel.sh/docs/browsers/live-view (headful URL present: lab P18; `readOnly` link not opened in lab). For an existing browser id, `kernel.browsers.retrieve(id)` returns `browser_live_view_url` too (`references/observe.md` O6)
 
 Embedding in an iframe and parent-frame events: see the docs page.
 
@@ -129,4 +129,6 @@ Embedding in an iframe and parent-frame events: see the docs page.
 
 ---
 
-> Verified in lab: 2026-10-20, @onkernel/sdk 0.127.0, kernel CLI 0.49.0. Probes: P01 (create/execute/delete shapes, latency, retrieve after delete: confirmed; docs' 30 ms create latency: refuted client-side; headful live view URL: untested), P02 (close() does not delete, reconnect, timeout reaping: confirmed; standby status field: unclear, absent from responses), P04 (headless memory 1/2/4 and rejection: confirmed; "memory is headful-only" and "viewport matches page" and "viewport update restarts Chromium": refuted; headful 16GiB, `force: true`, kiosk, extensions, chrome_policy: untested), LEAD (GPU 403 gate and `location` gate: confirmed; GPU browser itself and regions other than default: untested). Not tested: 1 h CDP socket lifetime, live view `readOnly`, `us-west`.
+Verified in lab 2026-10-20 on @onkernel/sdk 0.127.0; types re-checked on 0.128.0
+
+Probes: P01 (create/execute/delete shapes, latency, retrieve after delete: confirmed; docs' 30 ms create latency: refuted client-side; headful live view URL: confirmed present in P18), P02 (close() does not delete, reconnect, timeout reaping: confirmed; standby status field: unclear, absent from responses), P04 (headless memory 1/2/4 and rejection: confirmed; "memory is headful-only" and "viewport matches page" and "viewport update restarts Chromium": refuted; headful 16GiB, `force: true`, kiosk, extensions, chrome_policy: untested), LEAD (GPU 403 gate and `location` gate: confirmed; GPU browser itself and regions other than default: untested). Not tested: 1 h CDP socket lifetime, live view `readOnly`, `us-west`.

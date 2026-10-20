@@ -46,7 +46,7 @@ Notes that change what you do:
 **Source** https://www.kernel.sh/docs/browsers/profiles/save-and-reuse
 
 ```ts
-// untested (docs snippet)
+// (dogfood) ran OK; a repeat run took the catch path (409 profile already exists)
 import Kernel, { ConflictError } from '@onkernel/sdk';
 const kernel = new Kernel();
 try {
@@ -57,6 +57,44 @@ try {
 ```
 
 CLI: `kernel profiles create --name my-profile`, `kernel browsers create --profile-name my-profile --save-changes` (flags from the CLI source, https://github.com/kernel/cli, `cmd/profiles.go` and `cmd/browsers.go`; `--profile-id` is the alternative and the two are mutually exclusive).
+
+## One script that logs in only when the profile is empty
+
+**If** a single unattended script must log in once and reuse the session on later runs
+**Do** create the profile (ignore the conflict), open a browser with `save_changes: true`, detect the login state inside the page, log in only if needed, and `deleteByID` in `finally`. One writer per run, runs sequential. Lab (dogfood): run 1 logged in, run 2 reused the profile and skipped the login.
+**Avoid** two overlapping runs (second writer overwrites the first), and putting the password in a file or log: pass it from an env var into the `code` string with `JSON.stringify` (the code runs in the VM; the string is sent to the Kernel API).
+**Source** dogfood D04
+
+```ts
+// (dogfood) ran OK, trimmed; PROFILE, BASE, USER, PASSWORD come from your config/env
+import Kernel, { ConflictError } from '@onkernel/sdk';
+const kernel = new Kernel();
+const code = `
+await page.goto(${JSON.stringify(BASE)} + '/secure', { waitUntil: 'domcontentloaded' });
+const wasLoggedIn = page.url() === ${JSON.stringify(BASE)} + '/secure'; // redirected to /login if not
+if (!wasLoggedIn) {
+  await page.goto(${JSON.stringify(BASE)} + '/login', { waitUntil: 'domcontentloaded' });
+  await page.fill('#username', ${JSON.stringify(USER)});
+  await page.fill('#password', ${JSON.stringify(PASSWORD)});
+  await Promise.all([page.waitForURL('**/secure', { timeout: 15000 }), page.click('button[type="submit"]')]);
+}
+return { wasLoggedIn };`;
+try {
+  await kernel.profiles.create({ name: PROFILE }, { maxRetries: 0 });
+} catch (e) {
+  if (!(e instanceof ConflictError)) throw e;
+}
+const browser = await kernel.browsers.create(
+  { headless: true, timeout_seconds: 300, profile: { name: PROFILE, save_changes: true }, tags: { run: 'login' } },
+  { maxRetries: 0, timeout: 60_000 },
+);
+try {
+  const res = await kernel.browsers.playwright.execute(browser.session_id, { code, timeout_sec: 60 }, { maxRetries: 0, timeout: 90_000 });
+  if (!res.success) throw new Error(`execute failed: ${String(res.error)}`);
+} finally {
+  await kernel.browsers.deleteByID(browser.session_id); // this is the save
+}
+```
 
 ## Many workers, same login
 
@@ -177,4 +215,4 @@ CLI (lab P09): `kernel profiles download <name> --to <dir>` extracts into `<dir>
 
 Source: `references/does-not-exist.md` (persistent names removed 2026-05-21; `browser.profile.origins` is a docs proposal, not an API).
 
-> Verified in lab: 2026-10-20, @onkernel/sdk 0.127.0, kernel CLI 0.49.0. Probes: P09 confirmed (save_changes writer persists login; CDP close does not save; sequential writers last-wins; false/omitted discards; download is zstd tar by default and tar on request; rename while in use allowed with id unchanged; `browsers.list({ status: 'active', query: profileId })` exposes `profile_save_changes`). P15 confirmed (acquire-time profile with `save_changes` persists), pool-level profile read-only unclear. P10 confirmed (Managed Auth profile opens logged in). NOT tested: concurrent writers racing, save on idle timeout, whether a running browser still saves after a rename, `browsers.update` profile load, `start_url` with a profile, executors-per-tab on one profile, 0-byte download HTTP status, CLI `--profile-name`/`--save-changes` flags on `browsers create` (from CLI source only).
+> Verified in lab 2026-10-20 on @onkernel/sdk 0.127.0; types re-checked on 0.128.0; snippets marked (dogfood) ran in an independent second run. kernel CLI 0.49.0. Probes: P09 confirmed (save_changes writer persists login; CDP close does not save; sequential writers last-wins; false/omitted discards; download is zstd tar by default and tar on request; rename while in use allowed with id unchanged; `browsers.list({ status: 'active', query: profileId })` exposes `profile_save_changes`). P15 confirmed (acquire-time profile with `save_changes` persists), pool-level profile read-only unclear. P10 confirmed (Managed Auth profile opens logged in). NOT tested: concurrent writers racing, save on idle timeout, whether a running browser still saves after a rename, `browsers.update` profile load, `start_url` with a profile, executors-per-tab on one profile, 0-byte download HTTP status, CLI `--profile-name`/`--save-changes` flags on `browsers create` (from CLI source only).

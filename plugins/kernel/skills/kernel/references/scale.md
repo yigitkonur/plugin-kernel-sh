@@ -29,7 +29,7 @@ Three separate limits, easy to confuse (https://www.kernel.sh/docs/browsers/conc
 
 **If** you chose a pool -> **Do**:
 1. Create it once at deploy or startup. `size` is required (omitting it is a 400 "size must be at least 1").
-2. Wait for fill (`retrieve(...).available_count`) before sending traffic. First fill of a size-1 pool took 6 s in the lab; refills after `reuse: false` took about 4 s; after `flush` 44 s; after `update({ discard_all_idle: true })` 58 s. Docs say a pool "takes a few minutes to fill" at size. Never create a pool inside a request.
+2. Wait for fill before sending traffic: poll `retrieve(...).available_count` with a deadline (loop below). Fill time grows with size: a size-1 pool took 6 s in the lab, a size-2 pool about 55 s to reach `available_count=2` (dogfood, 12 polls at 5 s), so use a generous deadline (the dogfood loop allowed 240 s). Other timings: refills after `reuse: false` took about 4 s; after `flush` 44 s; after `update({ discard_all_idle: true })` 58 s. Docs say a pool "takes a few minutes to fill" at size. Never create a pool inside a request.
 3. `acquire` with `acquire_timeout_seconds`; null-check the result.
 4. `release` in `finally`.
 
@@ -39,7 +39,10 @@ import Kernel from '@onkernel/sdk';
 const kernel = new Kernel();
 const POOL = 'my-pool';
 
-const browser = await kernel.browserPools.acquire(POOL, { acquire_timeout_seconds: 60 });
+const browser = await kernel.browserPools.acquire(POOL, {
+  acquire_timeout_seconds: 60,
+  tags: { run: 'job-42' }, // lease-only tags: makes the lease findable
+});
 if (!browser) throw new Error('no browser ready before the deadline'); // 204 surfaces as null
 try {
   // drive browser.cdp_ws_url or kernel.browsers.playwright.execute(browser.session_id, ...)
@@ -51,20 +54,38 @@ try {
 (Trimmed from probe P15 `03-pool-acquire-timing-and-204.ts` and `04-release-reuse-cookie-leak.ts`, which ran ok; the `if (!browser)` guard and `reuse: false` choice are the only changes.)
 
 **Avoid**:
-- **Treating 204 as an error or a hang.** When no browser is ready, `acquire` waits `acquire_timeout_seconds`, then returns HTTP 204; the SDK type is `BrowserPoolAcquireResponse | null`. Lab: 204 after 5.8 s on a 5 s wait, and no `Retry-After` header. Retry yourself until your own deadline (loop below), do not tighten the loop.
+- **Treating 204 as an error or a hang.** When no browser is ready, `acquire` waits `acquire_timeout_seconds`, then returns HTTP 204; the SDK type is `BrowserPoolAcquireResponse | null`. Lab: 204 after 5.8 s on a 5 s wait, and no `Retry-After` header. Retry yourself a bounded number of times (loop below), do not tighten the loop.
 - **Pools in the request path** (create/delete per request defeats the point).
 - **Forgetting release.** An acquired browser stays out of the pool until you release it or its `timeout_seconds` idle timer (default 600, starts only after acquire) destroys it and the pool replaces it. The timeout is a backstop.
 - **Leaving a pool behind.** `browserPools.delete(name)` while a browser is leased is refused with 400 (not 409): "Cannot delete pool. 1 browser(s) are currently in use. Use force=true to terminate them." `delete(name, { force: true })` kills the leased browser too (it 404s afterwards).
 
 ```ts
-// untested: deadline loop around a null-returning acquire
-async function acquireBy(pool: string, deadlineMs: number) {
-  const end = Date.now() + deadlineMs;
-  while (Date.now() < end) {
-    const b = await kernel.browserPools.acquire(pool, { acquire_timeout_seconds: 30 });
-    if (b) return b;
+// (dogfood) ran OK: bounded acquire retry (null means 204), then a bounded fill poll
+import Kernel from '@onkernel/sdk';
+
+const kernel = new Kernel();
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function acquireWithRetry(pool: string, tags: Record<string, string>) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const lease = await kernel.browserPools.acquire(
+      pool,
+      { acquire_timeout_seconds: 120, tags },
+      { maxRetries: 0, timeout: 150_000 },
+    );
+    if (lease) return lease;
   }
-  throw new Error(`pool ${pool}: no browser before deadline`);
+  throw new Error(`pool ${pool}: no browser after 3 attempts`);
+}
+
+async function waitForFill(pool: string, size: number, deadlineMs = 240_000) {
+  const end = Date.now() + deadlineMs;
+  for (;;) {
+    const p = await kernel.browserPools.retrieve(pool);
+    if (p.available_count >= size) return;
+    if (Date.now() > end) throw new Error(`pool ${pool}: not filled before deadline`);
+    await sleep(5000);
+  }
 }
 ```
 
@@ -209,4 +230,4 @@ Pool create params, from the installed types: `size` (required), `name`, `fill_r
 
 ---
 
-> Verified in lab: 2026-10-20, @onkernel/sdk 0.127.0, kernel CLI 0.49.0. Probes: P15 (pool create/size-required, acquire, 204 null, acquire vs create timing refuted, reuse leak, reuse:false isolation, flush, update discard_all_idle, delete without/with force, acquire-time profile save_changes: all confirmed except timing refuted); P16 (org limits fields confirmed; counter +1 per browser, return-to-baseline refuted; SDK error classes confirmed; 429/529 semantics and concurrency-overflow status unclear/untested; GPU plan-gate error not reached). NOT tested: pool-level profile read-only, pool resize via `update`, `expected_network`, allowlist behavior on pools, attach-after-acquire via `browsers.update`, a real 429, 529, the pool plan-gate error, fill-rate caps, pool timing beyond n=3, executors-on-one-browser pattern, SDK retry of 409/5xx (source read only).
+> Verified in lab 2026-10-20 on @onkernel/sdk 0.127.0; types re-checked on 0.128.0; snippets marked (dogfood) ran in an independent second run. kernel CLI 0.49.0. Probes: P15 (pool create/size-required, acquire, 204 null, acquire vs create timing refuted, reuse leak, reuse:false isolation, flush, update discard_all_idle, delete without/with force, acquire-time profile save_changes: all confirmed except timing refuted); P16 (org limits fields confirmed; counter +1 per browser, return-to-baseline refuted; SDK error classes confirmed; 429/529 semantics and concurrency-overflow status unclear/untested; GPU plan-gate error not reached). NOT tested: pool-level profile read-only, pool resize via `update`, `expected_network`, allowlist behavior on pools, attach-after-acquire via `browsers.update`, a real 429, 529, the pool plan-gate error, fill-rate caps, pool timing beyond n=3, executors-on-one-browser pattern, SDK retry of 409/5xx (source read only).

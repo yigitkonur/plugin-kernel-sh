@@ -53,7 +53,7 @@ kernel browsers playwright execute <id> 'return await page.title()' -o json
 kernel browsers computer screenshot <id> --to ./shot.png
 ```
 
-- **Leftover browsers:** **If** you finish a task that created browsers -> **Do** run `kernel browsers list --status active -o json | jq length` (filter by `--tag` if you tagged them) and report anything alive. `--status` takes `active` (default), `deleted` or `all`. **Avoid** `browsers list --include-deleted` (deprecated; use `--status`).
+- **Leftover browsers:** **If** you finish a task that created browsers -> **Do** run `kernel browsers list --status active -o json | jq length` (filter by `--tag` if you tagged them) and report anything alive. `--status` takes `active` (default), `deleted` or `all`: `browsers list` shows only active browsers by default, so a just-deleted browser is absent (an empty list after delete is normal, dogfood D11); use `--status all` or `deleted`, or `browsers get <id> --include-deleted`. **Avoid** `browsers list --include-deleted` (deprecated; use `--status`).
 - **Deleted session:** **If** `browsers get <id>` exits 1 with Not_found after a delete -> **Do** retry with `--include-deleted`: exit 0, `deleted_at` set, and no `status` key. **Avoid** reading a missing `status` as "unknown". **Source** probe P20 (confirmed).
 - **Playwright snippet:** **If** you need a value from a page -> **Do** note the code runs with `page` in scope; use `return` to get a value. Result shape: `{ result, success, tab: { created, target_id } }`. A new browser starts on `about:blank`, so pass `--start-url` at create or `page.goto` first. `--executor` runs it in a named executor with its own tab; `--timeout` is in seconds. **Avoid** `page.title()` on a fresh browser without `--start-url` (it is `about:blank`). **Source** probe P20 (confirmed); https://github.com/onkernel/cli `cmd/browsers_playwright.go`.
 - **Screenshot:** **If** you need a visual check -> **Do** use `--to <path>`, which writes a PNG and prints `SUCCESS: Saved screenshot to ...` **Avoid** printing image bytes to the terminal. **Source** P20 (confirmed: valid PNG).
@@ -74,7 +74,7 @@ kernel browsers delete <id>
 
 **If** you delete a browser -> **Do** run `kernel browsers delete <id-or-name> [more...]` with no `-y`. **Avoid** `-y` here: the lab binary (self-reports 0.47 in places) rejects it (exit 1, `Unknown shorthand flag: 'y'`) even though https://www.kernel.sh/docs/reference/cli/browsers lists it. Delete never prompts and is idempotent: a missing or already-deleted id prints success. **Source** probe P20 (confirmed); `cmd/browsers.go` `browsersDeleteCmd` has no flags.
 
-**If** you need the live view -> **Do** `kernel browsers view <id> -o json  # untested` (field `liveViewUrl` per docs; unverified live). **Avoid** pasting that URL anywhere: it is a credential. Mask the token path segment in anything you report, e.g. `https://api.onkernel.com/browser/live/***`.
+**If** you need the live view -> **Do** `kernel browsers view <id> -o json  # untested` (the SDK field is `browser_live_view_url`; the CLI JSON key was not run, so check it). **Avoid** pasting that URL anywhere: it is a credential. Mask the token path segment in anything you report, e.g. `https://api.onkernel.com/browser/live/***`.
 
 **If** a profile, proxy, viewport, name, tags or telemetry must change on a running browser -> **Do** `kernel browsers update <id-or-name> ...  # untested` (flags in `--help`). **Avoid** guessing flags; read `--help`. **Source** https://www.kernel.sh/docs/reference/cli/browsers (untested live).
 
@@ -88,7 +88,7 @@ kernel browsers delete <id>
 
 **If** you scaffold an app from an agent -> **Do** pass every flag: `kernel create --name my-app --language ts --template sample-app`. With flags it writes 6 files (`index.ts`, `package.json`, `tsconfig.json`, `README.md`, `.gitignore`, `pnpm-lock.yaml`) and does not deploy. **Avoid** omitting flags: without a TTY it exits 1 with `Cannot prompt for input: stdin is not an interactive terminal` and lists the missing flags. Also note it runs `pnpm install` (or `uv venv` for Python) if that tool is on PATH, which hits the network; if the tool is absent it prints a WARNING and still exits 0. `-y` overwrites an existing directory without asking. **Source** probe P20 (confirmed).
 
-**If** you deploy or invoke -> **Do** `kernel deploy index.ts -o json  # untested` then `kernel invoke <app> <action> --payload '{...}' -o json  # untested`; read results later with `kernel invoke history --app <app> --status failed --limit 5` and `kernel logs <app> -i <invocation>`. `invoke` is async by default; `--sync` holds an HTTP request open, `--async-timeout` is 10-3600 s. **Avoid** retrying a failed invoke or deploy blindly (not idempotent) and `deploy --force` unless overwriting the same version is intended. `kernel deploy delete` and `kernel app delete` take `-y`. Not run in P20 (untested); full flow in `references/apps.md`.
+**If** you deploy or invoke -> **Do** `kernel deploy index.ts -o json  # untested` then `kernel invoke <app> <action> --payload '{...}' -o json  # untested`; read results later with `kernel invoke history --app <app> --status failed --limit 5` and `kernel logs <app> -i <invocation>`. `invoke` is async by default; `--sync` holds an HTTP request open, `--async-timeout` is 10-3600 s. **Avoid** retrying a failed invoke or deploy blindly (not idempotent) and `deploy --force` unless overwriting the same version is intended. `kernel deploy delete` and `kernel app delete` take `-y` (`--yes`) and fail without it when stdin is not a terminal; `browsers delete` has no `-y`. Not run in P20 (untested); full flow in `references/apps.md`.
 
 ## Org and cost checks
 
@@ -112,7 +112,9 @@ kernel browsers delete <id>
 
 ---
 
-> Verified in lab: 2026-10-20 on the lab binary (self-reports CLI 0.47 in places; v0.49.0 not retested); SDK version not recorded per probe. Probe P20 partial.
+Verified in lab 2026-10-20 on @onkernel/sdk 0.127.0; types re-checked on 0.128.0
+
+> Lab binary self-reports CLI 0.47 in places; v0.49.0 not retested. Probe P20 partial.
 > - Confirmed: read-only `-o json` lists (12 commands), `auth context`, `status`, `org limits get` keys, `org entitlements`, `browsers create` with `-y`/name/tags, `browsers delete` (no prompt, no `-y`, idempotent), `browsers get --include-deleted`, `playwright execute`, `computer screenshot --to`, error shape, `kernel create` with and without flags.
 > - Unclear: `browsers logs stream` returning lines.
 > - Not tested: `proxies check`, `telemetry events` flags, `browsers view`/`update`, `deploy`/`invoke`/`logs <app>`, `mcp install`, `org limits set`, `create` without `-y`, the jq pipeline on `org limits get`, whether null `max_*` means unlimited.

@@ -37,7 +37,7 @@ kernel profiles get "$B" -o json > diff/profile-b.json
 jq -r '[.id,.name,.created_at,.updated_at,.last_used_at] | @tsv' diff/profile-a.json diff/profile-b.json
 ```
 
-(Replace `$A` and `$B` with the two values from the user. `profiles get` flags are from the CLI source; unverified as a shell line.)
+(Replace `$A` and `$B` with the two values from the user.)
 
 Shell state does not persist between Bash calls. Note the printed workdir path, and start every later block with `cd <that literal path>` and use the literal profile names in place of `$A` and `$B`. Do the same for cleanup.
 
@@ -80,9 +80,9 @@ For any surface without a block in step 5 (Secure Preferences, Local Extension S
 
 ## 5. Focused diffs
 
-None of these blocks were run against a real profile (guard logic only on a synthetic file). Run only the ones the table selected.
+The cookie, storage and extension blocks have been run on two real profiles. Run only the ones the table selected.
 
-**Cookies** (select `length(encrypted_value)`, never `value`; modern Chrome encrypts the value and leaves `value` empty, per the Kernel profile-archive reference skill; untested):
+**Cookies** (select `length(encrypted_value)`, never `value`; modern Chrome encrypts the value and leaves `value` empty, per the Kernel profile-archive reference skill):
 
 ```bash
 for s in a b; do
@@ -117,6 +117,8 @@ for f in ss-keys-a ss-keys-b ls-origins-a ls-origins-b; do [ -f "diff/$f.txt" ] 
 [ -f diff/ls-origins-a.txt ] && [ -f diff/ls-origins-b.txt ] && diff diff/ls-origins-a.txt diff/ls-origins-b.txt | head -40
 ```
 
+A storage surface can be present yet yield nothing. In a real run, Session/Local Storage had 6 files per profile and the patterns extracted zero keys on both sides; that cannot tell "the site stores nothing there" from "the pattern missed LevelDB content" (`strings` only sees uncompressed bytes, and `.ldb` blocks may be compressed). So if a surface has files but its key file is empty or missing, never write "no difference". Report `Session Storage: no keys extracted (files present: N)` (same for Local Storage) and fall back to file counts and `du -sk` sizes of the directory on each side, e.g. `for s in a b; do find "$s" -type d -name 'Session Storage' -not -path '*/Extension*' | head -1 | while read -r d; do echo "$s $(ls "$d" | wc -l) files $(du -sk "$d" | cut -f1) KB"; done; done`. Treat a count or size difference as a hint only, and say key names were not compared.
+
 If a file was discarded, show neither diff of that pair; report `Session Storage: not checked (value bytes adjacent)` (or `Local Storage: ...`) under "Not checked". `map-N` numbers differ between profiles and mean nothing; the `sed` strips them. Look for auth-shaped keys missing on B (`authCookie`, `sessionGUID`, `*_token`, tenant or account GUIDs).
 
 **Extensions and Login Data**:
@@ -143,7 +145,7 @@ Tie every difference to the issue; do not paste raw diffs. Likely causes, strong
 - Extension or Login Data row on A only: page behavior or autofill differs on B.
 - Local Storage origin or IndexedDB auth origin (Firebase, Clerk) populated on A only: site session state is absent on B.
 
-Profiles are last-writer-wins: if two jobs share a profile with `save_changes: true`, the later deletion overwrites the earlier. Check this when B "lost" state A had. To find a live writer, run `kernel browsers list --status active -o json` (add `--project` if one was named) and filter with `jq '.[] | select(.profile.id=="<id>") | {session_id, profile_save_changes}'` (untested field path). Renaming a profile keeps its id and the old name stops resolving at once. If a script still uses the old name, that explains a 404 on one side.
+Profiles are last-writer-wins: if two jobs share a profile with `save_changes: true`, the later deletion overwrites the earlier. Check this when B "lost" state A had. To find a live writer, run `kernel browsers list --status active -o json` (add `--project` if one was named) and filter with `jq '.[] | select(.profile.id=="<id>") | {session_id, profile_save_changes}'`. Renaming a profile keeps its id and the old name stops resolving at once. If a script still uses the old name, that explains a 404 on one side.
 
 ## 7. Cleanup
 
@@ -184,4 +186,4 @@ Workspace: removed | kept at <path>
 Never include values, only names, counts and lengths.
 
 ---
-Verified 2026-10-20 against SDK 0.128.0 / CLI 0.49.0; see verified-facts.md and ../kernel/references/profiles.md.
+Verified 2026-10-20 against SDK 0.128.0 / CLI 0.49.0; see the plugin repository's verified-facts.md and ../kernel/references/profiles.md.

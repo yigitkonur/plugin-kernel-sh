@@ -13,7 +13,7 @@ The argument is the text after the skill name (or the line starting `ARGUMENTS:`
 
 Rules for the whole run:
 - Never print, paste or log an API key, a `hosted_url`, a `handoff_code`, a `cdp_ws_url`, a live view URL or a replay URL. They are credentials. Keep them out of your context with `jq` projections and files written under `umask 077`.
-- Never pass a password, TOTP secret or one-time code as a CLI argument (`--value`, `--field-value`). A human types secrets into the hosted page.
+- Never pass a password, TOTP secret or one-time code as a CLI argument (`--value`, `--field-value`), and never use `kernel credentials create --value password=...` (its own help shows that form). A human types secrets into the hosted page, or the shipped script stores them from environment variables (Step 3 item 4).
 - Never dump `follow` or `timeline` streams; use `jq` filters and `--limit`/`--type`.
 - Never delete the connection or profile to recover. Recovery is another `login` on the same connection.
 - Shell state does not persist between Bash calls: write ids and names literally.
@@ -32,7 +32,8 @@ Docs: "If the task can be done through an API or an MCP server, use that instead
 
 | Situation | Path |
 |---|---|
-| Nobody watches the run, it recurs, or the site uses SSO or MFA | Managed Auth (Steps 3 to 6) |
+| Nobody watches the run, it recurs, or the site uses SSO or MFA, and a person can open the hosted page | Managed Auth (Steps 3 to 6) |
+| Nobody will be at the hosted page and you hold the user's credentials | Managed Auth with a stored Kernel credential (Step 3 item 4); without one the flow waits for a person and fails `awaiting_input_timeout` after 10 minutes |
 | The user is present and the agent drives navigation, submit and recovery (a login can appear mid-task) | Vault fill: see "Fill from Vault" in `../kernel/references/logins.md`; the steps below do not apply |
 
 Never mix both on one site in one run.
@@ -46,18 +47,26 @@ A connection ties one domain to one profile; a profile holds at most one connect
      | jq '[.[] | {id, domain, profile_name, status, can_reauth, can_reauth_reason}]'
    ```
 2. If one matches the account the user means, reuse its `id` and `profile_name`. If several match and you cannot tell them apart, ask which profile; do not guess.
-3. If none matches, choose a stable profile name (one per end user or account, for example `<domain>-main`). Before creating anything, state the path (Managed Auth), the profile name and the connection (domain + profile) and wait for a yes. Skip the wait only if the user already named them.
-4. Create it. Pass `--no-health-checks` unless the user asked for unattended reuse: health checks and reauths each start a billed browser session (https://www.kernel.sh/docs/auth/faq).
+3. If none matches, choose a stable profile name (one per end user or account). A domain-only request does not name the profile: use `<domain-slug>-main` (dots to dashes, for example `example-com-main`). For a NEW connection and profile name, state what you will create (path, profile name, domain) and proceed: creation costs nothing until used and health checks are off. Wait for a yes only when a connection or profile for that domain already exists (reuse or new), before deleting anything, or before `--save-changes` on an existing profile.
+4. Credentials for an unattended login. With a stored Kernel credential Managed Auth logs in with no person present (verified live: `AUTHENTICATED` about 45 s after `login`). Without one it waits for a person to type on the hosted page and ends `FAILED`, `error_code` `awaiting_input_timeout`, after 10 minutes. So when you hold the user's credentials and nobody will be at the page, store a credential first with the shipped script (the scripts folder next to this SKILL.md):
    ```bash
-   kernel auth connections create --domain <domain> --profile-name <profile> --no-health-checks -o json \
+   node "${CLAUDE_SKILL_DIR}/scripts/create-credential.mjs" <credential-name> <domain>
+   ```
+   It reads `SITE_USER`, `SITE_PASSWORD`, optional `SITE_TOTP_SECRET` and `KERNEL_API_KEY` from the environment and prints only id, name and domain. Exit 2 means a variable is missing (if `KERNEL_API_KEY` is the one, ask the user to export it); exit 1 is an HTTP error (409: the name exists, so reuse it only if it is for this domain, else pick another name). How the secrets reach it:
+   - The user exports them in the shell that launched Claude Code: run the command as is.
+   - The user keeps them in a gitignored `.env`: `node --env-file=.env "${CLAUDE_SKILL_DIR}/scripts/create-credential.mjs" <credential-name> <domain>`.
+   - The user pasted the password into the chat: write a temp env file under `umask 077` with a heredoc (never as a command-line argument), run the script with `--env-file=<file>`, `rm -f` the file, and tell the user the secret is now in the transcript, so they should rotate it if it is real.
+   Email, SMS and push codes still need a person even with a stored credential.
+5. Create the connection, with `--credential-name <name>` when you stored one. Pass `--no-health-checks` unless the user asked for unattended reuse: health checks and reauths each start a billed browser session (https://www.kernel.sh/docs/auth/faq).
+   ```bash
+   kernel auth connections create --domain <domain> --profile-name <profile> --no-health-checks [--credential-name <name>] -o json \
      | jq '{id, status, can_reauth, can_reauth_reason, health_checks}'
    ```
-   A new connection starts `NEEDS_AUTH`, `can_reauth: false`, reason `no_prior_successful_login`. That is normal.
-5. On HTTP 409 the domain and profile already have a connection. Run `kernel auth connections list --domain <domain> --profile-name <profile> -o json` and reuse the exact match (the 409 body also carries `existing_id`).
-6. Options, only when needed:
+   A new connection starts `NEEDS_AUTH`, `can_reauth: false`, reason `no_prior_successful_login`. That is normal. `connections create` also creates the profile.
+6. On HTTP 409 the domain and profile already have a connection. Run `kernel auth connections list --domain <domain> --profile-name <profile> -o json` and reuse the exact match (the 409 body also carries `existing_id`).
+7. Options, only when needed:
    - Unattended reuse: drop `--no-health-checks`; the lowest `--health-check-interval` depends on the plan, so read the 400 message instead of guessing.
-   - Saved credential for unattended reauth: `--credential-name <name>`. Create it in the Kernel dashboard, or have the user run a small SDK script reading `SITE_USER` and `SITE_PASSWORD` from the environment. Never `kernel credentials create --value password=...`.
-   - TOTP authenticator: the credential needs `totp_secret` (see `../kernel/references/logins.md`, "MFA"). Email, SMS and push codes need a human every time.
+   - TOTP authenticator: set `SITE_TOTP_SECRET` for the script (see `../kernel/references/logins.md`, "MFA"). Email, SMS and push codes need a human every time.
    - Custom login page or extra SSO hosts: `--login-url`, `--allowed-domain` (repeat per host).
 
 ## Step 4. Log in
@@ -68,14 +77,14 @@ A connection ties one domain to one profile; a profile holds at most one connect
    kernel auth connections login <id> -o json > "$F" \
      && jq '{flow_type, flow_expires_at, has_hosted_url: (.hosted_url != null)}' "$F"
    ```
-   Never call `login` again to check progress or nudge a stuck flow: it starts a new flow with a different `hosted_url` and cancels the first.
+   Never call `login` again to check progress or nudge a stuck flow: it starts a new flow with a different `hosted_url` and cancels the first. That is also the way to end a pending flow without deleting the connection (the previous flow shows `CANCELED` in the timeline); otherwise wait for it to expire.
 3. `follow` can block about 20 minutes but the Bash tool stops at 10. Run it in the background (`run_in_background`), writing to a private file. Do not use `timeout`: stock macOS does not have it; stop the background task yourself instead.
    ```bash
    umask 077; kernel auth connections follow <id> -o json \
      | jq --unbuffered -c 'select(.event=="managed_auth_state") | {flow_status, flow_step, error_code}' \
      > "${TMPDIR:-/tmp}/kernel-follow-<id>.log"
    ```
-   Poll every ~15 s (`sleep 15`) with the Step 5 `get` command until `flow_status` is terminal (`SUCCESS`, `FAILED`, `EXPIRED`, `CANCELED`). Stop the background task when it is terminal or after about 9 minutes, whichever comes first. Run nothing else that changes this connection meanwhile.
+   Poll every ~15 s (`sleep 15`) with the Step 5 `get` command until `flow_status` is terminal (`SUCCESS`, `FAILED`, `EXPIRED`, `CANCELED`). The hosted flow waits 10 minutes for input, so poll up to about 11 minutes, not less. Stop the background task when it is terminal or after about 11 minutes, whichever comes first. Run nothing else that changes this connection meanwhile.
 4. If `flow_step` is `AWAITING_INPUT` or `AWAITING_EXTERNAL_ACTION`, a person must act.
    - User present: open the hosted page without printing it, and give the URL to the user once in a message only if no opener works:
      ```bash
@@ -83,8 +92,9 @@ A connection ties one domain to one profile; a profile holds at most one connect
      (open "$(jq -r .hosted_url "$F")" 2>/dev/null || xdg-open "$(jq -r .hosted_url "$F")" 2>/dev/null) || echo "no opener available"
      ```
      If it prints `no opener available`, tell the user to run `jq -r .hosted_url <file path>` in their own terminal. Say "Finish the login in the page that opened; I will wait here", and keep polling the same flow.
-   - User not present: do not open anything. Report `AWAITING_INPUT` in the report and stop.
-5. If the flow ends `EXPIRED` or `CANCELED`, allow exactly ONE more `login` on the same connection (back to item 2). If it ends that way again, stop and report.
+   - User not present: do not open anything. If you hold the user's credentials, store a credential (Step 3 item 4) and run `login` once on the same connection; otherwise report `AWAITING_INPUT` and stop.
+   - If the flow ends `awaiting_input_timeout`, report it (it needs a person or a stored credential) and stop; do not retry with the same setup (a second `login` times out the same way).
+5. If the flow ends `EXPIRED` or `CANCELED` (not `awaiting_input_timeout`), allow exactly ONE more `login` on the same connection (back to item 2). If it ends that way again, stop and report.
 6. Non-secret choices only: `kernel auth connections submit <id> --choice-id <choice id>`. Secrets go through the hosted page.
 7. React embed: out of scope; see `../kernel/references/logins.md`, section "React embed".
 8. When the flow is finished, `rm -f` the two temp files.
@@ -106,6 +116,7 @@ Proceed to the browser check only when `status` is `AUTHENTICATED` and, if a flo
 | `rate_limited` | Wait for the site's window, then one new `login`. |
 | `website_error` | Usually the site; Kernel retried once. Try later. |
 | `unsupported_auth_method` | Passkeys are unsupported; the account must use password plus TOTP. |
+| `awaiting_input_timeout` | Nobody typed on the hosted page within 10 minutes. Store a credential (Step 3 item 4) or get a person to the page of a fresh `login`. Do not loop. |
 
 Never loop on a failed login. If `status` is `NEEDS_AUTH` with no `error_code`, run `login` once on the same connection. To see what happened: `kernel auth connections timeline <id> --per-page 5 -o json | jq '.events[] | {timestamp, type, status, step, error_code}'`.
 
@@ -128,7 +139,7 @@ Signed in means `logout_links` is above 0 and the URL path is not the login path
 - Before consequential work (purchase, post, send), verify in a fresh profile browser; run `login` and wait for `SUCCESS` if it lands on a login page. `status` alone can be stale.
 - If the connection falls to `NEEDS_AUTH`, `login` again on the same connection and send the person to the new hosted page. Do not delete and recreate it.
 - Health checks cost browser time; off on one-shot connections (`kernel auth connections update <id> --no-health-checks`).
-- Cleanup for one-shot runs: `kernel auth connections delete <id>`, then `kernel profiles delete <profile>`. Confirm first; it cannot be undone.
+- Cleanup for one-shot runs (confirm first; it cannot be undone): `kernel auth connections delete <id> --yes`, then `kernel profiles delete <profile> --yes`, and `kernel credentials delete <name> -y` for a credential you created. Without the flag they fail when stdin is not a terminal.
 
 ## Report to the user
 End with exactly this, filled in, with no secret or URL:
@@ -147,4 +158,4 @@ Not verified: <anything unverified you relied on, or none>
 ```
 If the run stopped early, put the stop reason in `Decision` and `n/a` elsewhere.
 
-> Verified in lab 2026-10-20, SDK 0.128.0 / CLI 0.49.0. CLI `follow`, `timeline`, `submit`, the CLI 409 output and failure codes were not run; see verified-facts.md.
+> Verified in lab 2026-10-20, SDK 0.128.0 / CLI 0.49.0: credential script, `connections create --credential-name`, `login` and `follow` reached `AUTHENTICATED` with no human; `awaiting_input_timeout` seen. CLI `submit`, the CLI 409 output and the other failure codes were not run; see verified-facts.md.

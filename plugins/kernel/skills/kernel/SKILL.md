@@ -25,20 +25,27 @@ The shape every Kernel task should have (ran live; type-checks against the SDK):
 import Kernel from '@onkernel/sdk';
 
 const kernel = new Kernel();
-const browser = await kernel.browsers.create({
-  headless: true,
-  timeout_seconds: 120,                       // runtime plus a margin
-  tags: { run: process.env.RUN_ID ?? 'local' }, // lets you find and sweep this run's browsers if the process is killed
-});
+const browser = await kernel.browsers.create(
+  {
+    headless: true, // fine for an unwatched, undefended one-off; omit it (headful is the default) for defended sites or replays
+    timeout_seconds: 120, // runtime plus a margin
+    tags: { run: process.env.RUN_ID ?? 'local' }, // lets you find and sweep this run's browsers if the process is killed
+  },
+  { maxRetries: 0, timeout: 30_000 }, // a retried create can duplicate: see sdk-client.md
+);
 try {
-  const res = await kernel.browsers.playwright.execute(browser.session_id, {
-    code: "await page.goto('https://example.com'); return await page.title();",
-    timeout_sec: 30,
-  });
+  const res = await kernel.browsers.playwright.execute(
+    browser.session_id,
+    { code: "await page.goto('https://example.com'); return await page.title();", timeout_sec: 30 },
+    { maxRetries: 0, timeout: 40_000 }, // request timeout > timeout_sec
+  );
   if (!res.success) throw new Error(String(res.error));
   console.log(res.result);
 } finally {
-  await kernel.browsers.deleteByID(browser.session_id); // a 404 here means the timeout already reaped it
+  // a 404 means the timeout already reaped the browser: that is fine
+  await kernel.browsers.deleteByID(browser.session_id).catch((e) => {
+    if (!(e instanceof Kernel.NotFoundError)) throw e;
+  });
 }
 ```
 
@@ -63,7 +70,7 @@ Read the matching reference before writing a call: this file is the summary, not
 ## Verify instead of remembering
 
 Kernel releases every one to three days, so names and limits in memory go stale. When a name, flag, default or limit decides what you write:
-- read the installed types in `node_modules/@onkernel/sdk` (the package ships no `api.md`), `references/api-map.md`, and `kernel <command> --help`;
+- read the installed types in `node_modules/@onkernel/sdk` (the package ships no `api.md`; if it is not installed yet, `npm i @onkernel/sdk`, Node 20+), `references/api-map.md`, and `kernel <command> --help`;
 - or read https://www.kernel.sh/docs/llms.txt, the API reference at https://www.kernel.sh/docs/api-reference, or ask the Kernel MCP `search_docs`;
 - if a doc page and the installed types disagree, the types decide the call shape and a live call decides the truth;
 - anything these files mark "(unverified)" is not settled: test it on one throwaway browser before relying on it.
@@ -74,9 +81,9 @@ Kernel releases every one to three days, so names and limits in memory go stale.
 |---|---|
 | `references/sdk-client.md` | Writing the client: options, env vars, retries, errors, pagination, project scoping |
 | `references/browsers.md` | Creating browsers: lifecycle, timeouts, standby, memory, viewport, regions, GPU |
-| `references/control.md` | Driving the browser: Playwright execute, computer controls, CDP, REPL, WebMCP, files, processes, HTTP through the browser |
+| `references/control.md` | Scraping, extracting data or taking screenshots; driving the browser: Playwright execute, computer controls, CDP, REPL, WebMCP, files, processes, HTTP through the browser |
 | `references/unblock.md` | A site blocks, challenges or throttles you: stealth, proxies, captcha, config registry |
-| `references/logins.md` | The task needs a logged-in session: Managed Auth, vault fill, 1Password, MFA |
+| `references/logins.md` | The task needs a logged-in session: Managed Auth (hosted, React embed, programmatic), stored credentials, vault fill, 1Password, MFA |
 | `references/profiles.md` | State must survive between browsers: saving, loading, who may write |
 | `references/vaults-payments.md` | Credentials or cards must reach a page without the model seeing them |
 | `references/scale.md` | Many browsers or bursts: concurrency, pools, queueing |
