@@ -55,7 +55,7 @@ A connection ties one domain to one profile; a profile holds at most one connect
    It reads `SITE_USER`, `SITE_PASSWORD`, optional `SITE_TOTP_SECRET` and `KERNEL_API_KEY` from the environment and prints only `id`, `name`, `domain` and `has_totp_secret`. Exit 2 means a variable is missing (a Bash call may not see `KERNEL_API_KEY`: ask the user to export it before launching Claude Code, or put it in the env file); exit 1 is an HTTP error (409: the name exists, so reuse it only if it is for this domain, else pick another name). Never use an inline `SITE_PASSWORD=... node` prefix (it lands in shell history and the transcript). Pick how the secrets reach the script by the user's situation:
    1. The user exported the variables in the shell that launched Claude Code: run the command above as is.
    2. The user keeps them in a gitignored `.env`: `node --env-file=.env "${CLAUDE_SKILL_DIR}/scripts/create-credential.mjs" <credential-name> <domain>`.
-   3. The user pasted the password into the chat: it is already in the transcript; the goal is to keep it out of files, shell history and later commands. Prefer asking them to export it or put it in `.env` (options 1 and 2). Otherwise run `umask 077; mktemp -d`, write `<dir>/env` with the Write tool (file content, not a shell command or heredoc), run the script with `--env-file=<dir>/env`, then `rm -rf <dir>`. Never repeat the password in any command, and tell the user to rotate it if it is real.
+   3. The user pasted the password into the chat: it is already in the transcript; the goal is to keep it out of files, shell history and later commands. Prefer asking them to export it or put it in `.env` (options 1 and 2). Otherwise run `umask 077; mktemp -d`, write `<dir>/env` with the Write tool (file content, not a shell command or heredoc), run the script with `--env-file=<dir>/env` (that file holds only the site variables: `KERNEL_API_KEY` must already be in the environment, or pass a second `--env-file=.env` that holds it), then `rm -rf <dir>`. Never repeat the password in any command, and tell the user to rotate it if it is real.
 
    Email, SMS and push codes still need a person even with a stored credential.
 5. Create the connection, with `--credential-name <name>` when you stored one. Pass `--no-health-checks` unless the user asked for unattended reuse: health checks and reauths each start a billed browser session (https://www.kernel.sh/docs/auth/faq).
@@ -123,7 +123,7 @@ Never loop on a failed login. If `status` is `NEEDS_AUTH` with no `error_code`, 
 
 The login ran in a browser Kernel started and you never receive. Do not reuse any task browser that hit a login wall. Create a new one on the profile:
 ```bash
-kernel browsers create --profile-name <profile> --start-url https://<domain>/ -o json | jq '{session_id}'
+kernel browsers create --profile-name <profile> --start-url https://<domain>/ --tag run=login-check -t 240 -o json | jq '{session_id}'
 ```
 Keep only `session_id`. Check for a signed-in page, not a flash message:
 ```bash

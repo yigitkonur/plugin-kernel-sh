@@ -268,6 +268,21 @@ How to read this file. Each row is one claim that was tried against the live ser
 | P23.6 | Environment variables the SDK reads | confirmed | API key, base URL, log level, custom headers, Bun warning, browser routing; it does not read a project variable |
 | P23.7 | Scoped API keys with `policy` and `expires_at` | untested | Documentation only; no key was created |
 
+## Dogfood (naive agents that know Kernel only from the plugin files)
+
+Haiku agents were given a realistic user request (24 tasks: screenshots, scraping, logins, vault fill, parallel visits, pools, Apps, debugging a failed session, downloads and uploads, stealth, profiles, an audit, a Next.js route, a negative case that needs no browser, and cleanup of leftover browsers). They could read the plugin files and the installed SDK types, nothing else, and had to run their code live on the lab account, delete what they created, and report every wrong, missing, ambiguous or hard-to-find line.
+
+| round | tasks run | succeeded | cleanup verified | guidance problems reported |
+|---|---|---|---|---|
+| 1 | 23 | 20 | 22 | 159 |
+| 2 | 10 (killed by a rate limit) | 10 | 10 | 72 |
+| 3 | 23 (final skill text, minus the leftover-cleanup task) | 23 | 23 | 128 |
+| 4 | 13 (tasks whose guidance had just changed, plus the leftover-cleanup task) | 13 | 13 | 84 |
+
+Round 1 failures: the audit task ran code instead of staying read-only, and both Managed Auth tasks stalled for ten minutes because no stored credential existed (the hosted flow then waits for a person). Both led to changes: the audit skill is read-only by rule, and the login skill now stores a credential first through a script that keeps the password off command lines. All three passed in rounds 3 and 4. After each round the real defects (contradictions between files, snippets that were not copy-paste, wrong facts, missing cleanup, flags that need `--yes`) were fixed and the rest was triaged as environment artifacts of the test harness.
+
+Still open after round 4, by design: the interactive OAuth sign-in to the Kernel MCP server (needs a person), the payment flows, TOTP and captcha-solving beyond what the lab touched, and ambiguity reports about secrets handling for public demo accounts, which the plugin answers with one policy (a password never goes in project code or on a command line; throwaway accounts read it from the environment at run time).
+
 ## MCP inside Claude Code (lead checks)
 
 | id | claim | result | evidence |

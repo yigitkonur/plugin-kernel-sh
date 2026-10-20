@@ -176,6 +176,8 @@ Captcha events (verified live, `stealth: true` + captcha telemetry, which is in 
 - Sharing `replay_view_url`; it is sensitive.
 
 ```ts
+import { writeFileSync } from 'node:fs';
+
 const replay = await kernel.browsers.replays.start(id);
 // ...drive the page...
 // order matters: stop, wait for finished_at, download, and only then delete the browser
@@ -192,7 +194,7 @@ for (let i = 0; res.status === 202 && i < 30; i++) { // still finalizing: wait R
   res = await dl();
 }
 if (!res.ok) throw new Error(`replay download failed: HTTP ${res.status}`);
-writeFileSync('replay.mp4', Buffer.from(await res.arrayBuffer())); // import { writeFileSync } from 'node:fs'
+writeFileSync('replay.mp4', Buffer.from(await res.arrayBuffer()));
 await kernel.browsers.deleteByID(id); // last, after the file is on disk
 ```
 

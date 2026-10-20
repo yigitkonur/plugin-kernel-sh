@@ -29,7 +29,7 @@ Three separate limits, easy to confuse (https://www.kernel.sh/docs/browsers/conc
 
 **If** you chose a pool -> **Do**:
 1. Create it once at deploy or startup. `size` is required (omitting it is a 400 "size must be at least 1").
-2. Wait for fill before sending traffic: poll `retrieve(...).available_count` with a deadline (loop below). Fill time grows with size: a size-1 pool took 6 s, a size-2 pool about 55 s to reach `available_count=2` (12 polls at 5 s), so use a generous deadline (the loop below allows 240 s). Warm-up varied between runs (about 10 s and about 60 s for the same size): poll up to the deadline in the snippet, do not hardcode a wait. Other timings: refills after `reuse: false` took about 4 s; after `flush` 44 s; after `update({ discard_all_idle: true })` 58 s. Docs say a pool "takes a few minutes to fill" at size. Never create a pool inside a request.
+2. Wait for fill before sending traffic: poll `retrieve(...).available_count` with a deadline (loop below). Fill time grows with size: a size-1 pool took 6 s, a size-2 pool about 55 s to reach `available_count=2` (12 polls at 5 s), so use a generous deadline (the loop below allows 240 s). Warm-up varied between runs (about 10 s and about 60 s for the same size): poll up to the deadline in the snippet, do not hardcode a wait. Other timings: refills after `reuse: false` took about 4 s on a size-1 pool, but a size-2 pool at the default `fill_rate_per_minute` (a percentage of the pool per minute; the cap is 25 for most organizations) replaced released browsers at about 0.5 per minute, and acquires for the later jobs of a 4-job run waited 178 s and 238 s; after `flush` 44 s; after `update({ discard_all_idle: true })` 58 s. So a small pool recycled with `reuse: false` is slow to serve more jobs than its size: size it at or above the number of concurrent jobs, keep the acquire deadline above the refill time, and do not use a pool for a short script that runs a handful of jobs (create a browser per task instead, about 330 ms each). Docs say a pool "takes a few minutes to fill" at size. Never create a pool inside a request.
 3. `acquire` with `acquire_timeout_seconds`; null-check the result.
 4. `release` in `finally`.
 
@@ -47,7 +47,7 @@ if (!browser) throw new Error('no browser ready before the deadline'); // 204 su
 try {
   // drive browser.cdp_ws_url or kernel.browsers.playwright.execute(browser.session_id, ...)
 } finally {
-  await kernel.browserPools.release(POOL, { session_id: browser.session_id, reuse: false });
+  await kernel.browserPools.release(POOL, { session_id: browser.session_id, reuse: false }, { maxRetries: 0, timeout: 30_000 });
 }
 ```
 

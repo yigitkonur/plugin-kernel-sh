@@ -162,7 +162,7 @@ Delete the browser (this saves the profile if created with `--save-changes`) and
 ```bash
 kernel browsers delete <browser-id>
 rm -f /tmp/state.png
-kernel browsers list --status active -o json | jq length
+kernel browsers list --status active --tag <the tag you created the browser with> -o json | jq length   # expect 0; the account may hold other people's browsers
 ```
 
 Delete a vault, item or profile only if you created it in this run for throwaway discovery and the user agrees; never one that existed before.

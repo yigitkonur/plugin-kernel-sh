@@ -176,7 +176,7 @@ Verified live: `query` set to the profile id returned that browser (total 1 with
 
 **If** you need to see what a profile holds, or compare two profiles
 **Do** download it and read counts and names, not values. Default format is a zstd-compressed tar (`application/zstd`, about 46 KB for a one-login profile); `format: 'tar'` gives a plain tar (about 5.5 MB, 212 entries). The CLI extracts a Chromium user-data layout (`Default/`, `Local State`, ...) into a directory (151 files observed).
-**Avoid** printing cookie values, committing the archive, or assuming zip. A profile that never had a save downloads as 0 bytes with no error (HTTP status not captured), so check the size before parsing.
+**Avoid** printing cookie values, committing the archive, or assuming zip. A profile that never had a save downloads as 0 bytes with no error (HTTP status not captured); the CLI prints an INFO "has no saved data yet", exits 0 and writes no files. Check the size before parsing, and save an empty profile once (a browser with `save_changes`, then delete it) if you need an empty but downloadable one.
 **Source** SDK `profiles.download` doc
 
 ```ts

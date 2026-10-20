@@ -150,8 +150,8 @@ Judge the two verdicts, then pick the cheapest rung that held. Rungs are the esc
 | vendors, no block | vendors, no block | Detection present, both pass | Normal headful; add stealth only if it blocks later at volume |
 | no block | blocked | Stealth helps on a controlled network (inference from one run) | `stealth: true`. Then re-test with the default stealth proxy (`proxy` omitted), because that is what production gets |
 | blocked | blocked | Both fail on this network | Next rungs: dedicated ISP proxy plus a profile, then residential proxy, then GPU browser (plan-gated); see `../kernel/references/unblock.md` |
-| BLOCKED by the analyzer in both modes, screenshots look normal | Analyzer false positive | Treat as not blocked and say so in the report ("analyzer verdict blocked, screenshot shows normal page"); use the no-block rows |
-| One side blocked by the analyzer and a screenshot shows a normal page, or a mode where no login page was analyzed | The block is unproven | Do not recommend stealth from it; re-judge with the screenshot and treat the mode as "no data" if nothing was analyzed |
+| BLOCKED by the analyzer | BLOCKED by the analyzer, screenshots look normal | Analyzer false positive | Treat as not blocked and say so in the report ("analyzer verdict blocked, screenshot shows a normal page"); use the no-block rows |
+| one side BLOCKED by the analyzer with a normal screenshot, or no login page analyzed | the other side as judged | The block is unproven | Do not recommend stealth from it; re-judge with the screenshots and treat a mode with nothing analyzed as "no data" |
 | blocked | no block | Odd; the proxy/network, not stealth, likely differs between runs | Offer one re-run (it creates two more billable browsers, a few cents) and wait for a yes; report as inconclusive if it repeats or the user declines |
 
 Vendor notes from the analyzer (use them in "Next steps"):
@@ -168,7 +168,7 @@ const browser = await kernel.browsers.create({ stealth: true, headless: false, t
 try {
   // ... drive it ...
 } finally {
-  await kernel.browsers.deleteByID(browser.session_id);
+  await kernel.browsers.deleteByID(browser.session_id).catch((e) => { if (!(e instanceof Kernel.NotFoundError)) throw e; });
 }
 ```
 

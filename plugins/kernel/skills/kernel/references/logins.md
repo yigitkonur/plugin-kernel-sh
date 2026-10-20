@@ -89,6 +89,7 @@ CLI equivalents exist for every step: `kernel auth connections create|get|update
 ```ts
 import Kernel, { ConflictError } from '@onkernel/sdk';
 
+const kernel = new Kernel();
 const PROFILE = 'acme-script-login';
 const { SITE_USER, SITE_PASSWORD } = process.env;
 if (!SITE_USER || !SITE_PASSWORD) throw new Error('SITE_USER and SITE_PASSWORD must be set');
@@ -124,7 +125,7 @@ try {
 }
 ```
 
-Run with `node --env-file=.env` (gitignored) or variables exported in your own shell. Sequential runs with `save_changes: true` are safe; concurrent runs on one profile are not.
+Run with `node --env-file=.env` (gitignored) or variables exported in your own shell. Sequential runs with `save_changes: true` are safe; concurrent runs on one profile are not. The profile now holds a logged-in session: when a throwaway task ends, delete it (`kernel profiles delete <name> --yes`; the CLI refuses without `--yes` in a non-interactive shell).
 
 ## Recovery: NEEDS_AUTH and EXPIRED
 
@@ -176,7 +177,7 @@ export async function POST(request: Request): Promise<Response> {
   const domain = cleanDomain(body.domain);
   if (!domain) return Response.json({ error: 'bad_domain' }, { status: 400 });
   const kernel = new Kernel();                     // KERNEL_API_KEY stays on the server
-  const conn = await connectionFor(kernel, domain, `user-${userId}`);
+  const conn = await connectionFor(kernel, domain, `user-${userId}`); // copy this helper from "409 on create" below
   const login = await kernel.auth.connections.login(conn.id, undefined, OPERATION);
   if (!login.handoff_code) return Response.json({ error: 'no_handoff_code' }, { status: 502 });
   // Return only these. Never hosted_url or live_view_url.

@@ -115,7 +115,7 @@ Embedding in an iframe and parent-frame events: see the docs page.
 
 ## B12. Existing browser, tags, names
 
-**If** a run may crash before cleanup -> **Do** tag at create (`tags: { run: '<id>' }`) and reconcile with `kernel.browsers.list({ status: 'active' })` or `kernel browsers list --status active --tag run=<id> -o json`. `name` works anywhere an id does (uniqueness among active sessions: unverified). **Avoid** relying on retries to be safe: create is not idempotent and the SDK sends no idempotency key (`references/sdk-client.md`). -> **Source** `references/api-map.md` (tag and list filters verified live)
+**If** a run may crash before cleanup -> **Do** tag at create (`tags: { run: '<id>' }`) and reconcile with `kernel.browsers.list({ status: 'active', tags: { run: '<id>' } })` or `kernel browsers list --status active --tag run=<id> -o json`. A list returns one page (20 by default, `limit` up to 100 with `offset` to page): for a "nothing left" check filter by tag, or page until a short page. `name` works anywhere an id does (uniqueness among active sessions: unverified). **Avoid** relying on retries to be safe: create is not idempotent and the SDK sends no idempotency key (`references/sdk-client.md`). -> **Source** `references/api-map.md` (tag and list filters verified live)
 
 ## B13. Agent next to Chromium
 
