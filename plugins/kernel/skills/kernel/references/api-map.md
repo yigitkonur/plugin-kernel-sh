@@ -126,4 +126,4 @@ See `references/does-not-exist.md`. The usual hallucinations: `browsers.delete`,
 
 Checked against `@onkernel/sdk` 0.127.0 types and source (0.128.0 diff reviewed), `kernel` CLI 0.49.0 `--help`, MCP server source at commit 5c0e58b. Live checks so far: `browsers.create/retrieve/deleteByID`, `playwright.execute` shapes, `auth context`, audit-log gating. Not yet verified live and marked as such where used: REST routes for most resources, MCP tool behavior beyond `initialize`.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

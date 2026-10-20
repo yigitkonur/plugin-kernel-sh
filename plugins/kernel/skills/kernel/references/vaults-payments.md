@@ -22,11 +22,13 @@ Vault fill was verified live. **Payments were never run** (real money, real wall
 1. One vault per end user or access boundary: `kernel.vaults.upsert({ name })`. Attaching a vault gives the browser every item in it, including items added later.
 2. Create the item with `kernel.vaults.items.upsert(key, { id_or_name, type: 'credential', spec: { provider: 'kernel', description, fields } })`. Keep secrets `sensitive: true` (the default). With no `value` the item is `pending_collection` with an `action.url` the user opens; poll `items.retrieve(key, { id_or_name, wait: 60 })` until `ready`.
 3. Attach the vault when you create the browser: `browsers.create({ vaults: [{ id: vault.id }] })`. The binding is fixed for the browser's life. Up to 20 references; each takes `id` or `name` (attach by `name` was not run).
-4. Navigate so the page is open at exactly the URL you will pass as `page_url`, retrieve the item, require `fill` in `available_operations`, then call `performOperation` with `type: 'fill'`, `browser_id: browser.session_id` (the session id, not a name), `page_url` and `fields: [{ field, selector }]`. Pass `{ maxRetries: 0 }`.
+4. Navigate so the page is open at exactly the URL you will pass as `page_url`, retrieve the item, require a `fill` entry in `available_operations` (an array of `{ type, description }` objects, not strings: match on `.type`), then call `performOperation` with `type: 'fill'`, `browser_id: browser.session_id` (the session id, not a name), `page_url` and `fields: [{ field, selector }]`. Pass `{ maxRetries: 0 }`.
 5. Submit the form yourself, then check the page for a logged-in signal.
 
 ```ts
-// untested as written: adapted from a live run (names changed, trimmed; secrets come from your backend, never literals in code)
+// untested as written: adapted from a live run (names changed, trimmed). `username` and `password` are never literals in code:
+// read them from the environment at run time (a throwaway account the user handed you; see references/logins.md and the
+// /kernel:login skill), or omit `value` and let the user type them into the collection form (`action.url`, step 2).
 const vault = await kernel.vaults.upsert({ name: 'user-12345' });
 await kernel.vaults.items.upsert('portal-login', {
   id_or_name: vault.id,
@@ -40,9 +42,15 @@ await kernel.vaults.items.upsert('portal-login', {
     ],
   },
 });
-const browser = await kernel.browsers.create({ headless: true, timeout_seconds: 240, vaults: [{ id: vault.id }] });
+const browser = await kernel.browsers.create(
+  { headless: true, timeout_seconds: 240, vaults: [{ id: vault.id }], tags: { run: process.env.RUN_ID ?? 'local' } },
+  { maxRetries: 0, timeout: 30_000 });
 try {
   // ... open the login page so its URL is exactly LOGIN ...
+  const item = await kernel.vaults.items.retrieve('portal-login', { id_or_name: vault.id, wait: 60 });
+  if (!('available_operations' in item) || !item.available_operations.some((o) => o.type === 'fill')) {
+    throw new Error('fill is not advertised yet');   // each operation is { type, description }
+  }
   const result = await kernel.vaults.items.performOperation('portal-login', {
     id_or_name: vault.id,
     type: 'fill',
@@ -55,7 +63,9 @@ try {
   }, { maxRetries: 0 });
   // result: { type: 'fill', status: 'completed', fields: [{ index: 0, status: 'filled' }, ...] }
 } finally {
-  await kernel.browsers.deleteByID(browser.session_id);
+  await kernel.browsers.deleteByID(browser.session_id).catch((e) => {
+    if (!(e instanceof Kernel.NotFoundError)) throw e;   // 404: the timeout already reaped it
+  });
 }
 ```
 
@@ -140,7 +150,7 @@ Choose by the lifecycle, not the merchant processor; only AgentCard's alias hand
 **If** paying with Link
 **Do**
 1. Put the browser on the **final** checkout page, then create the card item (`type: 'card'`, `spec: { provider: 'link', wallet, payment_method_id, amount, currency, merchant_name, merchant_url, context }`); `context` must be at least 100 characters; list methods via `wallet.expanded.payment_methods` (`expand: ['payment_methods']`) and let the user pick.
-2. Retrieve the card, require `authorize` in `available_operations`, and after user approval call `performOperation` `{ type: 'authorize', browser_id, page_url }` with the checkout's exact current top-level https URL. Kernel picks a link pay token (Stripe checkouts that expose Link's agent tools; send no merchant fields) or a single-use virtual card elsewhere. CLI: `kernel vaults items invoke <vault> <key> authorize --browser-id <id> --page-url <url>`.
+2. Retrieve the card, require an `authorize` entry in `available_operations` (match on `.type`), and after user approval call `performOperation` `{ type: 'authorize', browser_id, page_url }` with the checkout's exact current top-level https URL. Kernel picks a link pay token (Stripe checkouts that expose Link's agent tools; send no merchant fields) or a single-use virtual card elsewhere. CLI: `kernel vaults items invoke <vault> <key> authorize --browser-id <id> --page-url <url>`.
 3. Wait for the card to be `ready` (`items.retrieve(key, { id_or_name, wait: 60 })`), require `fill` again just before use, and follow the operation's `description`. Pay token: send only `browser_id` and `page_url`. Virtual card: add `fields` mapping `number`, `expiration` (with `format: 'MM/YY'`), `cvc` to unique selectors. Continue only on `completed`, then submit once.
 
 **Avoid**
@@ -192,4 +202,4 @@ Authorize errors that leave the card `requested` and safe to authorize again: `p
 
 - Docs say known execution failures can return HTTP 200 with `failed` or `unknown`; they do not describe pre-write validation errors. Verified live: pre-write validation failures (`page_not_found`, `element_not_found`, `timeout`) are HTTP 400 with `{ code, message }` and nothing is written. Branch on both.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

@@ -127,4 +127,4 @@ for await (const _browser of client.browsers.list()) visible++;
 - **Avoid** `kernel.browsers.delete` (undefined); use `deleteByID`. Full "does not exist" list: `references/does-not-exist.md`.
 - Audit logs: CLI has `search`, `download`, `export`, no `list`; Hobbyist is gated.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

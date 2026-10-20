@@ -73,7 +73,7 @@ Facts that change what you do:
 4. Live-only tools (screenshot, logs, process exec) need a live browser. Do not expect them for a deleted one (per the debug skill; untested).
 
 **Avoid**
-- The default window. `--since` defaults to 5 minutes before now, so an older session looks empty. Pass an RFC-3339 time or a duration like `1h`. `--until` in the future is rejected ("time must not be in the future").
+- The default window. `--since` defaults to 5 minutes before now, so an older session looks empty. Pass an RFC-3339 time or a duration like `1h` (CLI; in SDK code pass an ISO string). `--until` in the future is rejected ("time must not be in the future").
 - Dumping all events. A 12-second headful session produced 58 events of 16 types. Filter by `--types` or `--categories`, add `--limit`, use `jq`.
 - Trusting the wrong signals (all verified live):
   - A top-level `page.goto` to a page that answers HTTP 500 does throw, `net::ERR_HTTP_RESPONSE_CODE_FAILURE`, so `playwright.execute` returns `success:false`. The message is in the caller's result, not in telemetry.
@@ -87,7 +87,7 @@ Facts that change what you do:
 Event shapes you will filter on:
 - Every event, from the CLI (`-o json` gives `{ "events": [ ... ] }`), the SDK (`events()` and `stream()`) and the type declarations, is wrapped as `{ seq, event: { ts, type, category, source, data } }`. `seq` is on the wrapper, `ts` is microseconds. Read `e.event.type` and `e.event.data`, never `e.type`: a filter on top-level `category` or `type` silently matches nothing. The SDK stream loop destructures it as `{ seq, event }`.
 - `console_error.data`: `text`, `source_url`, `line`, `column`. `network_loading_failed.data`: `error_text`, `canceled`, `url`, `resource_type`, `target_type`.
-- `kernel.browsers.telemetry.events(id, { type: [...], category: [...], since, limit })` filters server-side and pages; iterate it with `for await`.
+- `kernel.browsers.telemetry.events(id, { type: [...], category: [...], since, limit })` filters server-side and pages; iterate it with `for await`. `since` is a string: the SDK types accept an RFC-3339 timestamp or a duration like `5m` (default `5m`), and `new Date(Date.now() - 3600_000).toISOString()` worked live; a duration string through the SDK is untested, so prefer the ISO form in code. `since` is ignored when `offset` is set and cannot combine with `order: 'desc'`.
 
 ## O3. React while it runs (stream)
 
@@ -150,9 +150,12 @@ Captcha events (verified live, `stealth: true` + captcha telemetry, which is in 
 
 **Case 2: person takes over** (MFA, a captcha you will not automate, an approval). **Do** hand over the plain URL, with no `readOnly`.
 
-Both cases:- Embed it in an iframe on your own page, and gate your UI on the parent-window message `KERNEL_PLAYING` (frames are rendering). `KERNEL_CONNECTED` only means signaling is up. Start a timer when you mount the iframe, and branch on `KERNEL_CONNECTION_FAILED` / `KERNEL_CONNECTION_TIMEOUT` `reason` (remount once for `transport`; for `peer` and `unsupported` show a persistent fallback message rather than remounting blindly). Do not gate on the timeout event alone.
+**Both cases, if you embed the view in your own page:**
+- Embed it in an iframe on your own page, and gate your UI on the parent-window message `KERNEL_PLAYING` (frames are rendering). `KERNEL_CONNECTED` only means signaling is up. Start a timer when you mount the iframe, and branch on `KERNEL_CONNECTION_FAILED` / `KERNEL_CONNECTION_TIMEOUT` `reason` (remount once for `transport`; for `peer` and `unsupported` show a persistent fallback message rather than remounting blindly). Do not gate on the timeout event alone.
 - Allow the live-view origins in your CSP (`frame-src` and `connect-src` for `*.onkernel.com:8443` and `*.kernel.sh:8443`, `wss:` for connect) and add `allow="autoplay; clipboard-read; clipboard-write"` for clipboard. The exact directives are on the docs page.
 - Toggle interactivity without reloading by posting `KERNEL_SET_READ_ONLY`; it needs a recent browser image and a resolvable `document.referrer`.
+
+**Handing the link to a teammate who just opens it in a tab (no iframe).** **Do** send the URL through a private channel (never print it into chat logs or output), say it is a live, controllable browser until deleted or timed out, and for a watcher append `readOnly=true`. (unverified: whether the link renders in a plain tab, and whether `readOnly=true` actually blocks clicks. The ledger only shows the URL is present and the option round-trips; it was never opened.) **Avoid** promising a watcher cannot interfere until someone has opened the read-only link and tried to click.
 
 **Avoid**
 - Treating the URL as public. It is a token for a live, controllable browser: do not log it, send it to a frontend you do not control, or put it in an LLM prompt. It becomes invalid when the browser is deleted or times out.
@@ -165,7 +168,7 @@ Both cases:- Embed it in an iframe on your own page, and gate your UI on the par
 
 ## O7. Replays
 
-**If** you want a video of the run (post-mortem, handoff, audit). **Do** create headful, `replays.start(id)` before the first action, `replays.stop(replayId, { id_or_name: id })` before you delete, then `list` until `finished_at` is set, then `download`. You may start several replays per browser; each has its own `replay_id`. **Avoid**
+**If** you want a video of the run (post-mortem, handoff, audit). **Do** create headful, `replays.start(id)` before the first action, `replays.stop(replayId, { id_or_name: id })` before you delete, then `list` until `finished_at` is set, then `download`, all before `deleteByID`. You may start several replays per browser; each has its own `replay_id`. **Avoid**
 - `replays.stop(rid, { id })` as the docs show. It throws client-side ("Path parameters result in path with invalid segments"). `stop` and `download` take `{ id_or_name }`; `start` and `list` take the id positionally.
 - A headless browser: `replays.start` returns 400 `invalid_request` "headless browsers don't support replays at this time".
 - A fixed sleep. Poll `finished_at`, and also handle HTTP 202 on download (a troubleshooting note reports 202 plus `Retry-After` while finalizing, not found in the Kernel docs pages; 200 came back immediately in 2 samples and never a 202, so keep the code path).
@@ -175,6 +178,7 @@ Both cases:- Embed it in an iframe on your own page, and gate your UI on the par
 ```ts
 const replay = await kernel.browsers.replays.start(id);
 // ...drive the page...
+// order matters: stop, wait for finished_at, download, and only then delete the browser
 await kernel.browsers.replays.stop(replay.replay_id, { id_or_name: id });
 for (let i = 0; i < 60; i++) {
   const hit = (await kernel.browsers.replays.list(id)).find((r) => r.replay_id === replay.replay_id);
@@ -189,9 +193,10 @@ for (let i = 0; res.status === 202 && i < 30; i++) { // still finalizing: wait R
 }
 if (!res.ok) throw new Error(`replay download failed: HTTP ${res.status}`);
 writeFileSync('replay.mp4', Buffer.from(await res.arrayBuffer())); // import { writeFileSync } from 'node:fs'
+await kernel.browsers.deleteByID(id); // last, after the file is on disk
 ```
 
-The download snippet's status, polling and `Buffer` read were verified live (200, video/mp4, about 272 KB for 10 s, video only, no audio); the whole create, replay and write-file flow ran again as written (200 on the first try). The 202 retry loop has never run, because no download returned 202. CLI (from the docs, untested): `kernel browsers replays start|stop|list|download`. Managed auth logins can record too (https://www.kernel.sh/docs/auth/configuration#record-sessions-for-debugging). Source: https://www.kernel.sh/docs/browsers/replays.
+After the browser is deleted, a replay that was stopped first can still be listed (`finished_at` set) and downloaded (200, video/mp4; verified live). Stop it before you delete; the snippet downloads first so you do not depend on this. The download snippet's status, polling and `Buffer` read were verified live (200, video/mp4, about 272 KB for 10 s, video only, no audio); the whole create, replay and write-file flow ran again as written (200 on the first try). The 202 retry loop has never run, because no download returned 202. CLI (from the docs, untested): `kernel browsers replays start|stop|list|download`. Managed auth logins can record too (https://www.kernel.sh/docs/auth/configuration#record-sessions-for-debugging). Source: https://www.kernel.sh/docs/browsers/replays.
 
 ## O8. Secrets in telemetry
 
@@ -214,4 +219,4 @@ Categories in one line each: `control` (api_call, cdp_command), `connection` (cd
 
 **If** the code runs as a Kernel App. **Do** use `kernel.invocations.follow(invocationId)` live; for past output the CLI needs the invocation id (`kernel logs <app> -i <invocation_id>`; `--since` alone printed only headers when tried). See `references/apps.md`. Source: https://www.kernel.sh/docs/apps/logs.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

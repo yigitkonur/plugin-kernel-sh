@@ -10,7 +10,9 @@ disable-model-invocation: true
 
 You are measuring how one website treats a Kernel stealth browser and a normal Kernel browser on the same network, naming the anti-bot vendors it uses, and recommending a Kernel configuration. Read-only toward the site (two page loads per browser: home page and a login page the analyzer finds, plus up to seven HEAD requests to common login paths when no login link is found). Creates two billable headful browsers (about $0.48/hour each, so roughly a few cents for ~5 minutes; Kernel pricing page, checked 2026-10-20); you delete both before you finish.
 
-Use it for a real target. A fingerprint test page such as bot.sannysoft.com cannot tell the modes apart: in a live run it gave 57 per-check results, all passing and identical in stealth and normal.
+Use it for a real target. A fingerprint test page such as bot.sannysoft.com cannot tell the modes apart: in a live run it gave 57 per-check results, all passing and identical in stealth and normal. If the URL is a fingerprint-test page, stop and ask for a real protected site; continue only if the user wants just that page profiled, and then state in the report that stealth and normal cannot be told apart on it.
+
+Browsers: by default both are created at once. If `concurrent_sessions_available` (step 1) is below 3, step 4 switches to the sequential variant (one browser alive at a time).
 
 The argument is the text after the skill name in the user's message (or the line starting `ARGUMENTS:`). It is a URL or hostname. If it is missing, ask for it and stop. Normalize a bare hostname to `https://<host>/`. Refuse and ask again if the URL has credentials, tokens, signed query strings, a path whose GET triggers an action, or any of `'`, `;`, `$`, a backtick or whitespace (the URL is written into a shell state file and a command). Only profile public sites the user is allowed to test (https://www.kernel.sh/docs/config-registry).
 
@@ -36,24 +38,28 @@ Then run `kernel auth context -o json | jq 'keys'` and `kernel org limits get -o
 
 ## 2. Ask the config registry first
 
-The registry holds settings that already worked for a site (https://www.kernel.sh/docs/config-registry; hobbyist plan and up). `lookup` is read-only: it visits nothing and creates nothing. There is no CLI command for it. Run now, with the normalized URL as `<URL>`:
+The registry holds settings that already worked for a site (https://www.kernel.sh/docs/config-registry; hobbyist plan and up). `lookup` is read-only: it visits nothing and creates nothing. There is no CLI command for it, so use the SDK (`kernel.configRegistry.lookup({ url })`). The key stays in the environment, never on a command line. The SDK is installed by step 3, so run step 3 first, then this (`TARGET_URL` comes from `state.env`):
 
 ```bash
-TARGET_URL='<URL>'
-RESP=$(jq -nc --arg url "$TARGET_URL" '{url:$url}' | curl -sS -m 20 -w '\n%{http_code}' -X POST https://api.onkernel.com/config-registry/lookup \
-  -H "Authorization: Bearer $KERNEL_API_KEY" -H 'Content-Type: application/json' --data @- || true)
-CODE=$(printf '%s\n' "$RESP" | tail -n 1); echo "registry status $CODE"
-[ "$CODE" = 200 ] && printf '%s\n' "$RESP" | sed '$d' | jq '{type: .recommendation.type, code: .recommendation.code, browser: .recommendation.browser, proxy_mode: .recommendation.proxy.mode, working: (.working_configurations|length), match: .recommendation.match_scope, guidance: (.guidance // null)}'
+source "$W/state.env"
+cd "$W/scripts" && TARGET_URL="$TARGET_URL" node --input-type=module -e '
+import Kernel from "@onkernel/sdk";
+try {
+  const r = await new Kernel().configRegistry.lookup({ url: process.env.TARGET_URL });
+  const rec = r.recommendation;
+  console.log(JSON.stringify({ status: "ok", type: rec?.type ?? null, code: rec?.code, browser: rec?.browser, proxy_mode: rec?.proxy?.mode, working: r.working_configurations.length, match: rec?.match_scope, guidance: r.guidance ?? null }, null, 2));
+} catch (e) { console.log(JSON.stringify({ status: String(e.status ?? "error") })); }
+'
 ```
 
-Read the status first. On anything other than 200 (or a curl error), skip this step and put `lookup failed <status>, skipped` in the report. On 200:
+Read `status` first. If it is not `ok`, skip this step and put `lookup failed <status>, skipped` in the report. If it is `ok`:
 - `type: "recommendation"`: keep `browser` and `proxy_mode` for step 8 and compare them with the measured result. `proxy_mode: "managed"` means the recommendation needs a managed proxy created once and reused. This skill does not create it (it runs both browsers on direct egress); to create or find it, follow `../kernel/references/unblock.md` section 5, "a dedicated ISP proxy / managed proxy" (`kernel.proxies.create({ type: 'isp', name })`, then `kernel.proxies.check(id)`, then `kernel.browsers.create({ proxy: { id } })`; look the proxy up by name before creating another). Treat `guidance` text that names unrelated CDNs as generic, not as a finding about this target.
 - `type: null` (no answer): the site is not necessarily unreachable. Do not call `resolve` unless the user asks (it runs several minutes in the background); this skill's own measurement is the evidence.
 - `type: "no_recommendation"`: print `code` (`proxy_restricted`, `target_not_evaluable`, `no_working_configuration`, `inconclusive`) and `guidance`.
 
 ## 3. Prepare the analyzer before creating browsers
 
-The analyzer is Kernel's official script (see `scripts/NOTICE.md`), with `package.json` pinned to `@onkernel/sdk` 0.128.0 and a lockfile. Find this skill's directory (the "Base directory for this skill" path shown when the skill loaded), then run now, replacing `<SKILL_DIR>` and `<URL>`:
+The analyzer is Kernel's official script (see `scripts/NOTICE.md`), with `package.json` pinned to `@onkernel/sdk` 0.128.0 and a lockfile. If dependencies are already installed in this skill's `scripts` folder (`node_modules` present), you may run the analyzer from there instead of copying and running `npm ci`; set `W` to a fresh `mktemp -d` anyway for logs and output, and `cd` into the skill's `scripts` for step 5. Otherwise find this skill's directory (the "Base directory for this skill" path shown when the skill loaded), then run now, replacing `<SKILL_DIR>` and `<URL>`:
 
 ```bash
 W=$(mktemp -d /tmp/profile-site.XXXXXX)
@@ -114,7 +120,7 @@ for m in stealth normal; do
   # strip the CDP and live view URLs from the saved report; it still holds site cookies and headers, so tell the user not to share $W
   jq 'del(.kernelSession.cdpWsUrl, .kernelSession.liveViewUrl)' "$R" > "$R.tmp" && mv "$R.tmp" "$R"
   echo "=== $m ==="
-  jq '{verdict: .summary.verdict, isBlocked: .summary.isBlocked, hasSuspicion: .summary.hasSuspicion, vendors: .summary.vendorNames, blockedPages: [.summary.blockedPages[] | {page, blockType, vendor, confidence}], blockedVendors: .summary.blockedVendors, suspicious: [.summary.suspiciousPages[] | {page, blockType}]}' "$R"
+  jq '{verdict: .summary.verdict, isBlocked: .summary.isBlocked, hasSuspicion: .summary.hasSuspicion, vendors: .summary.vendorNames, blockedPages: [.summary.blockedPages[]? | {page, blockType, vendor, confidence}], blockedVendors: .summary.blockedVendors, suspicious: [.summary.suspiciousPages[]? | {page, blockType}]}' "$R"
   jq -r '.vendorDetections | to_entries[] | "\(.key): \([.value.products[].product] | unique | join(", "))"' "$R"
 done
 ```
@@ -144,6 +150,7 @@ Judge the two verdicts, then pick the cheapest rung that held. Rungs are the esc
 | vendors, no block | vendors, no block | Detection present, both pass | Normal headful; add stealth only if it blocks later at volume |
 | no block | blocked | Stealth helps on a controlled network (inference from one run) | `stealth: true`. Then re-test with the default stealth proxy (`proxy` omitted), because that is what production gets |
 | blocked | blocked | Both fail on this network | Next rungs: dedicated ISP proxy plus a profile, then residential proxy, then GPU browser (plan-gated); see `../kernel/references/unblock.md` |
+| BLOCKED by the analyzer in both modes, screenshots look normal | Analyzer false positive | Treat as not blocked and say so in the report ("analyzer verdict blocked, screenshot shows normal page"); use the no-block rows |
 | One side blocked by the analyzer and a screenshot shows a normal page, or a mode where no login page was analyzed | The block is unproven | Do not recommend stealth from it; re-judge with the screenshot and treat the mode as "no data" if nothing was analyzed |
 | blocked | no block | Odd; the proxy/network, not stealth, likely differs between runs | Offer one re-run (it creates two more billable browsers, a few cents) and wait for a yes; report as inconclusive if it repeats or the user declines |
 
@@ -153,7 +160,7 @@ Vendor notes from the analyzer (use them in "Next steps"):
 - Kasada flow 1 (429 on first load), Akamai `_abck` without `~0~`, Imperva reese84: fingerprint or behavior signals; stealth plus a stable IP and a returning-user profile is the next try, nothing here proves a fix.
 - A 403 with `x-kernel-proxy-error`, or a 502, is Kernel's proxy layer, not the site's bot detection (`../kernel/references/unblock.md` section 8).
 
-If step 2 returned a recommendation that disagrees with your result, prefer your measurement on the user's real network and report the disagreement (both values) in the Registry line; offer to test the recommended config rather than ignoring either. Config snippet to hand back, only for the rung you recommend:
+If step 2 returned a recommendation that disagrees with your result, prefer your measurement on the user's real network and report the disagreement (both values) in the Registry line; offer to test the recommended config rather than ignoring either. This run used direct egress only: if the registry says stealth plus a managed proxy, the measurement wins for what was tested (stealth, direct), and the managed-proxy part stays a recommendation to try, not a result. Config snippet to hand back, only for the rung you recommend:
 
 ```ts
 // not run as written; create params are from the SDK types
@@ -192,4 +199,4 @@ Not verified: <list anything skipped or failed>
 ```
 
 > Checked 2026-10-20 against @onkernel/sdk 0.128.0 and kernel CLI 0.49.0.
-> Run live: the analyzer, `--stealth` with `--proxy-mode direct`, the curl form of `lookup`. Details in the plugin repository's verified-facts.md.
+> Run live: the analyzer, `--stealth` with `--proxy-mode direct`, the curl form of `lookup`. Details: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

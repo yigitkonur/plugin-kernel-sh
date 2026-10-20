@@ -100,7 +100,7 @@ Read `references/checklist.md` now. It has one row per judgment a regex cannot m
 ## 5. Verify before you report
 
 For each finding you are not certain of, check it against one of these, in this order, and drop the finding if the check disproves it:
-- the installed types: `grep -rn --include='*.d.ts' '<name>' "$PROJECT/node_modules/@onkernel/sdk"` (the package ships no `api.md`);
+- the installed types: `grep -rn --include='*.d.ts' '<name>' "$PROJECT/node_modules/@onkernel/sdk"` (the package ships no `api.md`). If the project has no `node_modules`, use `../kernel/references/api-map.md` and the nearest ancestor `node_modules/@onkernel/sdk` (look upward from `$PROJECT`), and say which copy and version you checked;
 - `kernel <command> --help` for a CLI flag;
 - the doc URL in the checklist row.
 

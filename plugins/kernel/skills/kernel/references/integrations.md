@@ -177,4 +177,4 @@ spawnSync('npx', ['--yes', 'agent-browser', 'close'], { env, encoding: 'utf8' })
 - Keep the Kernel key out of framework configs; `new Kernel()` reads `KERNEL_API_KEY`. Model keys belong in the environment, not in code.
 - Hand a framework `cdp_ws_url` only in-process; never print it or pass it as a CLI argument you log.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

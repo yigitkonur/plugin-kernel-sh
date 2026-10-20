@@ -11,7 +11,7 @@ Vocabulary you need: an App is deployed code, an action is one registered entry 
 ## S9. Write the action
 
 **If** you are writing an action -> **Do**:
-- `const app = kernel.app('<unique-name>')`, then `app.action('<name>', async (ctx: KernelContext, payload) => ...)`. Handlers must accept `ctx` (a zero-argument handler throws at load); `KernelContext` is `{ invocation_id: string }` (SDK `core/app-framework.ts`).
+- `const app = kernel.app('<unique-name>')`, then `app.action('<name>', async (ctx: KernelContext, payload) => ...)`. Handlers must accept `ctx` (a zero-argument handler throws at load); `KernelContext` is `{ invocation_id: string }` (SDK `core/app-framework.d.ts`).
 - Pass `invocation_id: ctx.invocation_id` to every `kernel.browsers.create` inside the action, plus `tags` and a `timeout_seconds` you chose. That ties the browser to the run so it can be listed and reaped.
 - Delete the browser in `finally` with `kernel.browsers.deleteByID(session_id)` (not `browser.close()`, which only disconnects: `references/browsers.md`).
 - Return plain JSON. It becomes the invocation `output` string; the caller parses it.
@@ -80,6 +80,7 @@ kernel deploy index.ts --version v1 -o json   # exit 0
 - `-o json` prints one JSON event per line. Do not read the stream into context; pull the last `app_version_summary` event, which carries `app_name`, `version` and `actions`.
 - Layout: `package.json` with `"type": "module"`, `tsconfig.json`, one lockfile (`bun.lock`, `package-lock.json` or `pnpm-lock.yaml`; recommended, a deploy without one succeeded in testing), `.gitignore` excluding `node_modules`.
 - Flags (CLI source, `kernel deploy --help`): `--version <v>` (default `latest`), `--force` (overwrite the same version label), `-e/--env KEY=VALUE` (repeatable), `--env-file <file>` (repeatable). Secrets go in `--env` / `--env-file`, never in the repo. Per-invocation secrets may go in the payload only if your app encrypts them (see Avoid in S11).
+- Region: `kernel deploy --region` currently accepts only `aws.us-east-1a` per `--help`, while invocation events may show another region name; treat the region as informational.
 - Scaffold: `kernel create -n <name> -l ts -t sample-app -y` (non-interactive; verified live).
 - GitHub source: `kernel deploy github --url ... --ref ... --entrypoint ... [--path <subdir>]` (docs only, (unverified): not run).
 
@@ -208,4 +209,4 @@ kernel app history my-app -o json      # []
 
 ---
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

@@ -14,7 +14,7 @@ The argument is the site (domain or name) and optionally the tasks to capture. I
 
 Rules for the whole run:
 - Never print API keys, `cdp_ws_url`, `webdriver_ws_url`, `browser_live_view_url`, replay URLs or credential values. The only permitted disclosure is ONE message to the user containing the collection or live-view URL. Never repeat it, log it, write it to a file or include it in the report.
-- Never ask the user for a raw password in chat and never put credentials in the skill, `AGENTS.md` or CLAUDE.md. Login goes through a vault or the user's own hands in live view.
+- Never ask the user for a raw password in chat and never put credentials in the skill, `AGENTS.md` or CLAUDE.md. Login goes through a vault or the user's own hands in live view (a throwaway or demo account handed to you: see step 4).
 - Never hard-code the user's id, profile, vault, browser id or account-specific URL parts in the generated skill; make them runtime inputs.
 - Use only the commands in this file. Run anything marked "(unverified)" once and check the result before you document it.
 - Stop and ask the user before any CAPTCHA, 2FA or other human check, any payment or purchase, and any destructive site action (delete, cancel, send, submit for real).
@@ -33,9 +33,9 @@ Decide the controls. Default is the CLI: `kernel browsers playwright execute` fo
 
 ## 3. Get consent, then prepare a discovery browser
 
-Name profiles and vaults `<site>-<user-id>`; resolve the user id from the message or project, ask if unknown. Check what exists first: `kernel profiles list -o json | jq -r '.[].name'` (unverified jq path; read the raw keys first with `jq '.[0]|keys'`).
+Name profiles and vaults `<site>-<user-id>`; resolve the user id from the message or project, ask if unknown. Skip this (and the profile and vault) when the flow needs neither, for example a public practice site with no login. Check what exists first: `kernel profiles list -o json | jq -r '.[].name'` (unverified jq path; read the raw keys first with `jq '.[0]|keys'`).
 
-Then list for the user every profile, vault, credential item and browser you will create or write to, marking which already exist. WAIT for a yes before creating anything. Never use `--save-changes` on a profile that existed before this run.
+Then list for the user every profile, vault, credential item and browser you will create or write to, marking which already exist. WAIT for a yes before creating anything. In a non-interactive run the user's explicit request to build and run is the consent for tagged browsers only; anything that creates a profile, vault or credential still needs a yes. Never use `--save-changes` on a profile that existed before this run.
 
 After the yes, create only what is absent (unverified; flags from CLI source):
 
@@ -62,7 +62,7 @@ kernel browsers playwright execute <browser-id> -o json 'await page.goto("<site-
 kernel browsers computer screenshot <browser-id> --to /tmp/state.png
 ```
 
-Read the PNG to judge the state. If login is needed, use the vault. Inspect the login form and note field names, types and sensitivity. Create the credential item without values (unverified CLI path; `fields` is an ordered array with `name`):
+Read the PNG to judge the state. If login is needed, use the vault. Exception: a throwaway or demo account whose credentials must reach a script and no vault is wanted. Follow the secrets policy in `../kernel/SKILL.md`: a password never goes in project code or on a command line, so use the SDK's `playwright.execute` (the CLI form puts the code on a command line), read the secret from the environment at run time and put it into the `code` string with `JSON.stringify` (it travels in the request body); never log that string, never commit it, never write values into the generated skill. A password pasted in chat is already in the transcript: keep it out of files, shell history and later commands. Inspect the login form and note field names, types and sensitivity. Create the credential item without values (unverified CLI path; `fields` is an ordered array with `name`):
 
 ```bash
 kernel vaults credentials create "<site>-<user-id>" "<site>-login" --spec-file - <<'JSON'
@@ -184,4 +184,4 @@ Cleaned up: <what was deleted; what was left and why>
 Open questions: <decisions for the user>
 ```
 
-Verified 2026-10-20, SDK 0.128.0 / CLI 0.49.0; sources: see verified-facts.md.
+Verified 2026-10-20, SDK 0.128.0 / CLI 0.49.0; evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

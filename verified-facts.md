@@ -210,6 +210,7 @@ How to read this file. Each row is one claim that was tried against the live ser
 | P19.8 | Replay list after delete | confirmed | Replay listed with `finished_at` set |
 | P19.10 | A `page_error` event type exists | refuted | Not in the SDK; errors arrive as `console_error` |
 | P19.11 | Deleted record has a status field | refuted | Only `created_at` and `deleted_at` |
+| R3.1 | A finished replay can be listed and downloaded after the browser is deleted | confirmed | After `deleteByID`: `replays.list` returns the replay with `finished_at` set; `download` 200 `video/mp4` (about 84 KB for a 5 s session) |
 
 ## CLI
 

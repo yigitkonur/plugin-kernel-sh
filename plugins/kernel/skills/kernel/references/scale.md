@@ -29,7 +29,7 @@ Three separate limits, easy to confuse (https://www.kernel.sh/docs/browsers/conc
 
 **If** you chose a pool -> **Do**:
 1. Create it once at deploy or startup. `size` is required (omitting it is a 400 "size must be at least 1").
-2. Wait for fill before sending traffic: poll `retrieve(...).available_count` with a deadline (loop below). Fill time grows with size: a size-1 pool took 6 s, a size-2 pool about 55 s to reach `available_count=2` (12 polls at 5 s), so use a generous deadline (the loop below allows 240 s). Other timings: refills after `reuse: false` took about 4 s; after `flush` 44 s; after `update({ discard_all_idle: true })` 58 s. Docs say a pool "takes a few minutes to fill" at size. Never create a pool inside a request.
+2. Wait for fill before sending traffic: poll `retrieve(...).available_count` with a deadline (loop below). Fill time grows with size: a size-1 pool took 6 s, a size-2 pool about 55 s to reach `available_count=2` (12 polls at 5 s), so use a generous deadline (the loop below allows 240 s). Warm-up varied between runs (about 10 s and about 60 s for the same size): poll up to the deadline in the snippet, do not hardcode a wait. Other timings: refills after `reuse: false` took about 4 s; after `flush` 44 s; after `update({ discard_all_idle: true })` 58 s. Docs say a pool "takes a few minutes to fill" at size. Never create a pool inside a request.
 3. `acquire` with `acquire_timeout_seconds`; null-check the result.
 4. `release` in `finally`.
 
@@ -54,6 +54,7 @@ try {
 **Avoid**:
 - **Treating 204 as an error or a hang.** When no browser is ready, `acquire` waits `acquire_timeout_seconds`, then returns HTTP 204; the SDK type is `BrowserPoolAcquireResponse | null`. Verified live: 204 after 5.8 s on a 5 s wait, and no `Retry-After` header. Retry yourself a bounded number of times (loop below), do not tighten the loop.
 - **Pools in the request path** (create/delete per request defeats the point).
+- **Expecting idle pool browsers to carry your run tag.** Only an acquired lease can be tagged (acquire-time `tags`; pool create has no `tags` field), so `browsers list --tag run=<id>` finds leases, not warm idle browsers. Reconcile a pool by `retrieve(pool)` counts (`acquired_count`) and by deleting the pool last. (unverified live: that an idle browser cannot be found by tag.)
 - **Forgetting release.** An acquired browser stays out of the pool until you release it or its `timeout_seconds` idle timer (default 600, starts only after acquire) destroys it and the pool replaces it. The timeout is a backstop.
 - **Leaving a pool behind.** `browserPools.delete(name)` while a browser is leased is refused with 400 (not 409): "Cannot delete pool. 1 browser(s) are currently in use. Use force=true to terminate them." `delete(name, { force: true })` kills the leased browser too (it 404s afterwards).
 
@@ -93,7 +94,7 @@ async function waitForFill(pool: string, size: number, deadlineMs = 240_000) {
 
 ## S4. Per-user work on a pool
 
-**If** pooled browsers serve different end users -> **Do** one of:
+**If** pooled browsers serve different end users -> **Do** one of (per-user isolation with nothing persisted is the last option: `release(POOL, { session_id, reuse: false })`):
 - **Acquire-time profile** (verified live): `acquire(pool, { profile: { name, save_changes: true } })` on a profile-free pool, then release. Cookie written in lease 1 was present in the next acquire of the same profile.
 - **Attach after acquire**: `kernel.browsers.update(session_id, { profile: { name, save_changes: true } })`, then `release({ reuse: false })`. This is the docs pattern; (unverified: only the acquire-time form was tried).
 - No persistent state needed: just release with `reuse: false`.
@@ -111,7 +112,22 @@ try {
 }
 ```
 
+Release several leases and clean up the pool without one failed release hiding the rest:
+
+```ts
+// leases: { session_id: string }[] acquired earlier from POOL
+const results = await Promise.allSettled(
+  leases.map((l) => kernel.browserPools.release(POOL, { session_id: l.session_id, reuse: false })),
+);
+for (const r of results) {
+  // 404 "session not found in pool" means the lease is already gone: fine
+  if (r.status === 'rejected' && !(r.reason instanceof Kernel.NotFoundError)) console.error('release failed', r.reason);
+}
+await kernel.browserPools.delete(POOL, { force: true }); // last, after every release was attempted
+```
+
 **Avoid**:
+- **`Promise.all` over releases.** One run got 404 `not_found` "session not found in pool" from `release(..., { reuse: false })`; that rejected `Promise.all`, and the `finally` deleted the pool before the other leases were released. Use `Promise.allSettled` and delete the pool last.
 - **`reuse: true` after user work.** Verified live: after a cookie was set in lease 1 and released with `reuse: true`, the next acquire got the same `session_id` and the cookie was present (one user's session leaked to the next acquirer). With `reuse: false` the next lease was a new session and the cookie was absent. `reuse` defaults to true.
 - A profile on the pool itself for per-user state: docs say it loads read-only and `save_changes` is silently ignored, and a pool holds one profile. (Read-only behavior not live-tested: needs a second profile-bound pool.) Use a pool profile only for one shared identity, e.g. a Managed Auth login every browser should start with (`references/profiles.md`).
 - Expecting your lease `name` / `tags` to persist: acquire-time `name` and `tags` apply to that lease only (`name` must be unique among active sessions in the project). Pool create has no `tags` field.
@@ -171,6 +187,44 @@ const free = l.concurrent_sessions_available; // cap your worker count at this, 
 - Split one org limit across teams or environments with project concurrency caps (`kernel projects limits get|set`, https://www.kernel.sh/docs/info/projects#concurrency-limits). `kernel org limits set` sets the default per-project cap, not the org limit.
 - Per plan the limits differ (Developer 5, Hobbyist 10, Start-Up 150 concurrent browsers; Enterprise custom): read them from `org limits get`, do not hard-code.
 
+Bounded concurrency over a list (N workers, one browser per item, one failure never rejects the run). Keep `N` at or below `concurrent_sessions_available` from the preflight above:
+
+```ts
+import Kernel from '@onkernel/sdk';
+
+const kernel = new Kernel();
+const N = 3; // must be <= concurrent_sessions_available
+const items = ['https://example.com', 'https://example.org'];
+
+async function one(url: string) {
+  const browser = await kernel.browsers.create(
+    { headless: true, timeout_seconds: 120, tags: { run: process.env.RUN_ID ?? 'local' } },
+    { maxRetries: 0, timeout: 30_000 },
+  );
+  try {
+    const res = await kernel.browsers.playwright.execute(
+      browser.session_id,
+      { code: `await page.goto(${JSON.stringify(url)}); return await page.title();`, timeout_sec: 30 },
+      { maxRetries: 0, timeout: 40_000 },
+    );
+    return { url, ok: res.success === true, result: res.result ?? res.error };
+  } catch (e) {
+    return { url, ok: false, result: String(e) }; // per-item catch: others keep going
+  } finally {
+    await kernel.browsers.deleteByID(browser.session_id).catch(() => {}); // 404 = already reaped
+  }
+}
+
+const out: Awaited<ReturnType<typeof one>>[] = [];
+let next = 0;
+await Promise.all(
+  Array.from({ length: Math.min(N, items.length) }, async () => {
+    while (next < items.length) out.push(await one(items[next++]!));
+  }),
+);
+console.log(out.length, 'done,', out.filter((r) => !r.ok).length, 'failed');
+```
+
 **If** you get 429 on create -> **Do** queue on your side (BullMQ or any queue, worker concurrency at or below `concurrent_sessions_available` or pool size), back off, honor `Retry-After`. The SDK already retries 429 up to 2 times honoring `Retry-After`, then throws `RateLimitError` with the headers. -> **Avoid** tightening the retry loop (a 429 means the org is over budget for the minute) and hand-rolled retry stacked on the SDK's.
 
 **If** you get a 5xx -> the SDK maps every status >= 500 to `InternalServerError`; there is no capacity or 529 class (read from `core/error.ts`). Treat it like 429: slow down. Whether the API ever returns 529, and what status a concurrency overflow returns, is (unverified: not documented, not produced live).
@@ -227,4 +281,4 @@ Pool create params, from the installed types: `size` (required), `name`, `fill_r
 
 ---
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

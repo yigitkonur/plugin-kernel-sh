@@ -47,15 +47,15 @@ A connection ties one domain to one profile; a profile holds at most one connect
      | jq '[.[] | {id, domain, profile_name, status, can_reauth, can_reauth_reason}]'
    ```
 2. If one matches the account the user means, reuse its `id` and `profile_name`. If several match and you cannot tell them apart, ask which profile; do not guess.
-3. If none matches, choose a stable profile name (one per end user or account). A domain-only request does not name the profile: use `<domain-slug>-main` (dots to dashes, for example `example-com-main`). For a NEW connection and profile name, state what you will create (path, profile name, domain) and proceed: creation costs nothing until used and health checks are off. Wait for a yes only when a connection or profile for that domain already exists (reuse or new), before deleting anything, or before `--save-changes` on an existing profile.
-4. Credentials for an unattended login. With a stored Kernel credential Managed Auth logs in with no person present (verified live: `AUTHENTICATED` about 45 s after `login`). Without one it waits for a person to type on the hosted page and ends `FAILED`, `error_code` `awaiting_input_timeout`, after 10 minutes. So when you hold the user's credentials and nobody will be at the page, store a credential first with the shipped script (in `scripts/` next to this SKILL.md; `${CLAUDE_SKILL_DIR}` is this skill's folder):
+3. If none matches, choose a stable profile name (one per end user or account). A domain-only request does not name the profile: use `<domain-slug>-main` (dots to dashes, for example `example-com-main`). For a NEW connection and profile name, state what you will create (path, profile name, domain) and proceed: creation costs nothing until used and health checks are off. Wait for a yes only when a connection or profile for that domain already exists (reuse or new), before deleting anything the user did not ask you to clean up, or before `--save-changes` on an existing profile.
+4. Credentials for an unattended login. With a stored Kernel credential Managed Auth logs in with no person present (verified live: `AUTHENTICATED` about 45 s after `login`). Without one it waits for a person to type on the hosted page and ends `FAILED`, `error_code` `awaiting_input_timeout`, after 10 minutes. So when you hold the user's credentials and nobody will be at the page, store a credential first with the shipped script. `${CLAUDE_SKILL_DIR}` is the folder of this skill; if it is empty (the skill was read as a plain file), the script is at `<plugin>/skills/login/scripts/create-credential.mjs`:
    ```bash
    node "${CLAUDE_SKILL_DIR}/scripts/create-credential.mjs" <credential-name> <domain>
    ```
    It reads `SITE_USER`, `SITE_PASSWORD`, optional `SITE_TOTP_SECRET` and `KERNEL_API_KEY` from the environment and prints only `id`, `name`, `domain` and `has_totp_secret`. Exit 2 means a variable is missing (a Bash call may not see `KERNEL_API_KEY`: ask the user to export it before launching Claude Code, or put it in the env file); exit 1 is an HTTP error (409: the name exists, so reuse it only if it is for this domain, else pick another name). Never use an inline `SITE_PASSWORD=... node` prefix (it lands in shell history and the transcript). Pick how the secrets reach the script by the user's situation:
    1. The user exported the variables in the shell that launched Claude Code: run the command above as is.
    2. The user keeps them in a gitignored `.env`: `node --env-file=.env "${CLAUDE_SKILL_DIR}/scripts/create-credential.mjs" <credential-name> <domain>`.
-   3. The user pasted the password into the chat: write a mode-600 temp env file under `umask 077` with a heredoc (never as a command-line argument), run the script with `--env-file=<file>`, `rm -f` the file, and tell the user the secret is now in the transcript, so they should rotate it if it is real.
+   3. The user pasted the password into the chat: it is already in the transcript; the goal is to keep it out of files, shell history and later commands. Prefer asking them to export it or put it in `.env` (options 1 and 2). Otherwise run `umask 077; mktemp -d`, write `<dir>/env` with the Write tool (file content, not a shell command or heredoc), run the script with `--env-file=<dir>/env`, then `rm -rf <dir>`. Never repeat the password in any command, and tell the user to rotate it if it is real.
 
    Email, SMS and push codes still need a person even with a stored credential.
 5. Create the connection, with `--credential-name <name>` when you stored one. Pass `--no-health-checks` unless the user asked for unattended reuse: health checks and reauths each start a billed browser session (https://www.kernel.sh/docs/auth/faq).
@@ -135,12 +135,13 @@ Signed in means `logout_links` is above 0 and the URL path is not the login path
 - Add `--save-changes` only on exactly one browser per profile: two writers overwrite each other (`../kernel/references/profiles.md`). Reading does not need it.
 - For the user's code, give `profile: { name: '<profile>' }` for `kernel.browsers.create`, not the session id of this browser.
 - Delete the verification browser unless the user asked to keep it: `kernel browsers delete <session_id>`.
+- A browser is ephemeral (it ends at its `timeout_seconds`), so "a logged-in browser I can keep" means handing over the profile name, the launch one-liner `kernel browsers create --profile-name <profile>` (SDK: `profile: { name }`) and the connection id. Keep a verification browser alive only if the user asks, with an explicit `--timeout <seconds>`, and report its id and expiry under `Left running`.
 
 ## Step 6. Recovery later (tell the user, one short paragraph)
 - Before consequential work (purchase, post, send), verify in a fresh profile browser; run `login` and wait for `SUCCESS` if it lands on a login page. `status` alone can be stale.
 - If the connection falls to `NEEDS_AUTH`, `login` again on the same connection and send the person to the new hosted page. Do not delete and recreate it.
 - Health checks cost browser time; off on one-shot connections (`kernel auth connections update <id> --no-health-checks`).
-- Cleanup for one-shot runs (confirm first; it cannot be undone): `kernel auth connections delete <id> --yes`, then `kernel profiles delete <profile> --yes`, and `kernel credentials delete <name> -y` for a credential you created. Without the flag they fail when stdin is not a terminal.
+- Cleanup cannot be undone. Delete what this run created when the user asked for cleanup or a throwaway test; otherwise ask first. Never delete a connection, profile or credential the user wants to keep, or one that existed before this run. Commands: `kernel auth connections delete <id> --yes`, then `kernel profiles delete <profile> --yes`, and `kernel credentials delete <name> -y` for a credential you created. Without the flag they fail when stdin is not a terminal.
 
 ## Report to the user
 End with exactly this, filled in, with no secret or URL:
@@ -151,7 +152,7 @@ Decision: <API/MCP instead | profile reuse | Managed Auth | vault fill> because 
 Connection: <id> (profile <profile name>)   status=<AUTHENTICATED|NEEDS_AUTH>   can_reauth=<true|false>
 Flow: <LOGIN|REAUTH> result=<SUCCESS|FAILED|EXPIRED|CANCELED|AWAITING_INPUT>   error_code=<none|code>
 Verification: <signed-in element seen on <url path> | redirected to login | not checked>
-Use it: kernel.browsers.create({ profile: { name: '<profile>' } })
+Use it: kernel browsers create --profile-name <profile>   (SDK: kernel.browsers.create({ profile: { name: '<profile>' } }))
 Health checks: <on|off>, interval <n>s
 Left running: <browser ids still alive, or none>
 Next step for you: <one line, for example "type the MFA code on the page that opened", or none>
@@ -159,4 +160,4 @@ Not verified: <anything unverified you relied on, or none>
 ```
 If the run stopped early, put the stop reason in `Decision` and `n/a` elsewhere.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

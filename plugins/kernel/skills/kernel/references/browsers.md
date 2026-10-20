@@ -123,8 +123,8 @@ Embedding in an iframe and parent-frame events: see the docs page.
 
 ## Deprecated on browsers
 
-**If** you are about to use a removed browser field -> **Do** use the replacement. **Avoid** `proxy_id` and `disable_default_proxy` on `browsers.create`: use `proxy: { mode: 'direct' | 'default' }` or `proxy: { id | name }` (`references/unblock.md`). **Avoid** persistent browsers: use profiles (`references/profiles.md`). **Avoid** `max_pooled_sessions`: use `max_concurrent_sessions`. **Avoid** `agents.auth`: use Managed Auth (`references/logins.md`). **Avoid** datacenter proxies (removed): use `isp` first. -> **Source** `references/does-not-exist.md`
+**If** you are about to use a removed or deprecated browser field -> **Do** use the replacement. **Avoid** `proxy_id` (deprecated: still typed on browsers in SDK 0.128.0, but do not use it) and `disable_default_proxy` on `browsers.create`: use `proxy: { mode: 'direct' | 'default' }` or `proxy: { id | name }` (`references/unblock.md`). **Avoid** persistent browsers: use profiles (`references/profiles.md`). **Avoid** `max_pooled_sessions`: use `max_concurrent_sessions`. **Avoid** `agents.auth`: use Managed Auth (`references/logins.md`). **Avoid** datacenter proxies (removed): use `isp` first. -> **Source** `references/does-not-exist.md`
 
 ---
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

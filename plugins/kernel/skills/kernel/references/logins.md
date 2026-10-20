@@ -26,10 +26,9 @@ Stored secrets stay out of API responses and model context, but not out of the p
 
 ```ts
 import Kernel from '@onkernel/sdk';
-import { chromium } from 'playwright-core';
 
 const kernel = new Kernel();
-const ONCE = { maxRetries: 0 } as const;   // create and login are side-effecting: never auto-retry
+const ONCE = { maxRetries: 0, timeout: 30_000 } as const;   // create and login are side-effecting: never auto-retry
 
 // 1. Store the credential first for any unattended run (without it the flow needs a person). From a shell, use the login skill's script.
 await kernel.credentials.create({
@@ -59,11 +58,11 @@ if (done.status !== 'AUTHENTICATED') throw new Error(`login ended ${done.flow_st
 const browser = await kernel.browsers.create(
   { profile: { name: 'acme-profile' }, timeout_seconds: 120, tags: { run: process.env.RUN_ID ?? 'local' } }, ONCE);
 try {
-  const pw = await chromium.connectOverCDP(browser.cdp_ws_url);
-  const context = pw.contexts()[0];                 // the profile lives in the default context
-  const page = context.pages()[0] ?? (await context.newPage());
-  await page.goto('https://example.com/account');
-  await pw.close();
+  const res = await kernel.browsers.playwright.execute(   // the profile is in the default context, so `page` is signed in
+    browser.session_id,
+    { code: "await page.goto('https://example.com/account'); return new URL(page.url()).pathname;", timeout_sec: 30 },
+    { maxRetries: 0, timeout: 40_000 });
+  if (!res.success) throw new Error(String(res.error));
 } finally {
   await kernel.browsers.deleteByID(browser.session_id).catch((e) => {
     if (!(e instanceof Kernel.NotFoundError)) throw e;
@@ -82,9 +81,9 @@ CLI equivalents exist for every step: `kernel auth connections create|get|update
 
 ## Scripted login once, reuse the profile
 
-**If** a dev script of yours logs in with a password itself (no Managed Auth) and later runs should reuse the session.
-**Do** read the password from an env var, build it into the `playwright.execute` code string at runtime, log in only when the protected page redirects to login, and open the browser with `save_changes: true` as the one writer for the profile; `deleteByID` in `finally`.
-**Avoid** a hard-coded password; a command-line argument or an inline `SECRET=... node` prefix (shell history); a second writer on the same profile.
+**If** a dev script of yours logs in with a password itself (no Managed Auth), for a throwaway or demo account the user handed you, and later runs should reuse the session. Throwaway/demo accounts only: for a real account use Managed Auth with a stored credential, or vault fill.
+**Do** read the password from the environment at run time and put it into the `playwright.execute` code string with `JSON.stringify` (`execute` takes only `code`, `executor` and `timeout_sec`, so it travels in the request body); never log that string and never commit it. Log in only when the protected page redirects to login; open the browser with `save_changes: true` as the one writer for the profile; `deleteByID` in `finally`.
+**Avoid** a hard-coded password; a command-line argument or an inline `SECRET=... node` prefix (shell history); a second writer on the same profile. A password pasted in chat is already in the transcript: keep it out of files, shell history and later commands.
 **Source** verified live (ran twice: login performed, then `wasLoggedIn: true`); `references/profiles.md`.
 
 ```ts
@@ -94,8 +93,7 @@ const PROFILE = 'acme-script-login';
 const { SITE_USER, SITE_PASSWORD } = process.env;
 if (!SITE_USER || !SITE_PASSWORD) throw new Error('SITE_USER and SITE_PASSWORD must be set');
 
-// Runs inside the Kernel VM; the secret is JSON-quoted in at runtime and travels in the request body, so for a
-// long-lived job prefer a stored credential (Managed Auth).
+// Runs inside the Kernel VM; the secret is JSON-quoted in at runtime and travels in the request body.
 const code = `
 await page.goto('https://example.com/account', { waitUntil: 'domcontentloaded' });
 const wasLoggedIn = new URL(page.url()).pathname === '/account';
@@ -108,16 +106,21 @@ if (!wasLoggedIn) {
 return { wasLoggedIn, path: new URL(page.url()).pathname };
 `;
 
-await kernel.profiles.create({ name: PROFILE }).catch((e) => { if (!(e instanceof ConflictError)) throw e; });
+await kernel.profiles.create({ name: PROFILE }, { maxRetries: 0, timeout: 30_000 })
+  .catch((e) => { if (!(e instanceof ConflictError)) throw e; });
 const browser = await kernel.browsers.create(
-  { headless: true, timeout_seconds: 300, profile: { name: PROFILE, save_changes: true } }, { maxRetries: 0 });
+  { headless: true, timeout_seconds: 300, profile: { name: PROFILE, save_changes: true }, tags: { run: process.env.RUN_ID ?? 'local' } },
+  { maxRetries: 0, timeout: 30_000 });
 try {
   const res = await kernel.browsers.playwright.execute(
     browser.session_id, { code, timeout_sec: 60 }, { maxRetries: 0, timeout: 90_000 });
   if (!res.success) throw new Error(`execute failed: ${String(res.error)}`);
   console.log(res.result);
 } finally {
-  await kernel.browsers.deleteByID(browser.session_id);
+  // a 404 means the timeout already reaped the browser: fine
+  await kernel.browsers.deleteByID(browser.session_id).catch((e) => {
+    if (!(e instanceof Kernel.NotFoundError)) throw e;
+  });
 }
 ```
 
@@ -146,32 +149,35 @@ Pattern (untested; docs): `await kernel.auth.connections.login(id)`, then `for a
 **If** the user must sign in inside your own app instead of on Kernel's hosted page.
 **Do** keep the API key on the server: a backend route creates or reuses the connection, calls `login`, and returns only the connection `id` and the one-time `handoff_code`. The page is a `'use client'` component with `<KernelManagedAuth sessionId handoffCode onSuccess onError />` (`sessionId` is the connection id) and the package stylesheet.
 **Avoid** the API key in the frontend; returning `hosted_url` or `live_view_url` (the `login` response carries both and both are credentials); reusing a `handoff_code` (single-use, so every reconnect needs a fresh `login`); taking `success_url` or `error_url` from client input; a `profile_name` shared across end users or derived from the domain (one profile per end user, never per domain); auto-retries on `connections.create` and `login`.
-**Source** https://www.kernel.sh/docs/auth/react; the route type-checks against @onkernel/sdk 0.128.0 (strict `tsc`; not run against Kernel); the component snippet is untested (the package was not installed).
+**Source** https://www.kernel.sh/docs/auth/react; the route type-checks against @onkernel/sdk 0.128.0 (strict `tsc`; not run against Kernel); the component and its props, callbacks and stylesheet path are (unverified): the package was not installed.
 
-`profile_name` must be per end user (`user-<id>` from your session, never from the request body, never per domain), or every app user shares one logged-in session. `connections.create` and `login` are side-effecting: pass `{ maxRetries: 0 }` and handle 409 with the typed `ConflictError` (the connection exists; use `existing_id`). `handoff_code` is optional in the SDK type (`handoff_code?`): return 502 when it is missing.
+`profile_name` must be per end user (`user-<id>` from your session, never from the request body, never per domain), or every app user shares one logged-in session. `connections.create` and `login` are side-effecting: pass `{ maxRetries: 0 }` and handle 409 (see "409 on create"; `connectionFor` below is defined there). `handoff_code` is optional in the SDK type (`handoff_code?`): return 502 when it is missing. A `domain` from the client is untrusted: validate it, and prefer an allow-list of the sites your app supports.
 
 ```ts
 // app/api/connect/route.ts
 import Kernel from '@onkernel/sdk';
 
-const kernel = new Kernel();                       // KERNEL_API_KEY stays on the server
+// Build the client inside the handler: `new Kernel()` throws when KERNEL_API_KEY is missing, and Next evaluates route modules at build time.
 const OPERATION = { maxRetries: 0, timeout: 30_000 } as const;
 
 // PLACEHOLDER: replace with your own session lookup. Returning null makes the route answer 401.
 const getSessionUserId = async (request: Request): Promise<string | null> => null;
 
+// Lower-case, strip scheme, path and port; the dotted name must end in a letter TLD, which rejects IPs and localhost.
+const cleanDomain = (input: unknown): string | null => {
+  const host = String(input ?? '').trim().toLowerCase().replace(/^[a-z]+:\/\//, '').split(/[/?#]/)[0].replace(/:\d+$/, '');
+  return /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$/.test(host) ? host : null;
+};
+
 export async function POST(request: Request): Promise<Response> {
   const userId = await getSessionUserId(request);
   if (!userId) return Response.json({ error: 'unauthorized' }, { status: 401 });
-  let connectionId: string;
-  try {
-    connectionId = (await kernel.auth.connections.create(
-      { domain: 'example.com', profile_name: `user-${userId}` }, OPERATION)).id;
-  } catch (e) {
-    if (!(e instanceof Kernel.ConflictError)) throw e;
-    connectionId = (e.error as { existing_id: string }).existing_id;   // already exists: reuse it
-  }
-  const login = await kernel.auth.connections.login(connectionId, undefined, OPERATION);
+  const body = (await request.json().catch(() => ({}))) as { domain?: unknown };
+  const domain = cleanDomain(body.domain);
+  if (!domain) return Response.json({ error: 'bad_domain' }, { status: 400 });
+  const kernel = new Kernel();                     // KERNEL_API_KEY stays on the server
+  const conn = await connectionFor(kernel, domain, `user-${userId}`);
+  const login = await kernel.auth.connections.login(conn.id, undefined, OPERATION);
   if (!login.handoff_code) return Response.json({ error: 'no_handoff_code' }, { status: 502 });
   // Return only these. Never hosted_url or live_view_url.
   return Response.json({ connectionId: login.id, handoffCode: login.handoff_code, flowExpiresAt: login.flow_expires_at });
@@ -179,15 +185,26 @@ export async function POST(request: Request): Promise<Response> {
 ```
 
 ```tsx
-// untested: from the docs page
+// untested: from the docs page; props, callbacks and the stylesheet path are (unverified)
 'use client';
+import { useState } from 'react';
 import { KernelManagedAuth } from '@onkernel/managed-auth-react';
 import '@onkernel/managed-auth-react/styles.css';
 
-<KernelManagedAuth sessionId={connectionId} handoffCode={code}
-  onSuccess={({ profileName, domain }) => { /* continue */ }}
-  onError={({ code, message }) => { /* show a retry */ }} />
+export function ConnectSite({ domain }: { domain: string }) {
+  const [auth, setAuth] = useState<{ connectionId: string; handoffCode: string } | null>(null);
+  const start = async () => {
+    const res = await fetch('/api/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ domain }) });
+    if (res.ok) setAuth(await res.json());          // { connectionId, handoffCode, flowExpiresAt }
+  };
+  if (!auth) return <button onClick={start}>Connect {domain}</button>;
+  return <KernelManagedAuth sessionId={auth.connectionId} handoffCode={auth.handoffCode}
+    onSuccess={({ profileName, domain }) => { /* continue */ }}
+    onError={({ code, message }) => { /* show a retry */ }} />;
+}
 ```
+
+`sessionId` on the component carries the connection id, not a browser `session_id`.
 
 - Default `baseUrl` talks to Kernel directly. For same-origin traffic set `baseUrl=""` and rewrite exactly these four routes to the Kernel API: `/auth/connections/:id/exchange`, `/auth/connections/:id`, `/auth/connections/:id/submit`, `/auth/connections/:id/events`.
 - The component gives no ongoing recovery: when the connection returns to `NEEDS_AUTH`, your backend calls `login` again and passes a fresh `handoff_code`.
@@ -268,57 +285,34 @@ The shipped script takes `SITE_TOTP_SECRET` and sets `totp_secret`; with the SDK
 ## 409 on create
 
 **If** `connections.create` returns 409 (that domain and profile already have a connection).
-**Do** read `existing_id` from the error body and use that connection.
-**Avoid** listing connections and guessing which one matches.
-**Source** verified live.
+**Do** read `existing_id` defensively from the error body and use that connection; if it is absent, list with the exact `domain` and `profile_name` and pick the match.
+**Avoid** guessing which connection matches from a loose list; trusting `existing_id` to be typed.
+**Source** `existing_id` verified live (409 body keys `code`, `existing_id`, `message`; its presence was checked, not that it equals the live connection id). It is NOT in the SDK types: `ConflictError.error` is an untyped object, so cast and check it.
 
 ```ts
-let conn;
-try {
-  conn = await kernel.auth.connections.create({ domain, profile_name });
-} catch (e) {
-  if (e instanceof Kernel.ConflictError) {   // typed 409; type-checks on 0.128.0
-    const existingId = (e.error as { existing_id: string }).existing_id;
-    conn = await kernel.auth.connections.retrieve(existingId);
-  } else throw e;
+async function connectionFor(kernel: Kernel, domain: string, profile_name: string) {
+  try {
+    return await kernel.auth.connections.create({ domain, profile_name }, { maxRetries: 0, timeout: 30_000 });
+  } catch (e) {
+    if (!(e instanceof Kernel.ConflictError)) throw e;   // typed 409
+    const id = (e.error as { existing_id?: unknown } | undefined)?.existing_id;
+    if (typeof id === 'string') return kernel.auth.connections.retrieve(id);
+    for await (const c of kernel.auth.connections.list({ domain, profile_name })) {
+      if (c.domain === domain && c.profile_name === profile_name) return c;
+    }
+    throw e;
+  }
 }
 ```
 
-Verified live: status 409, body keys `code`, `existing_id`, `message`; the key's presence was checked, not that it equals the live connection id. The same `ConflictError` catch on `profiles.create` also ran.
+The same `ConflictError` catch on `profiles.create` also ran live.
 
 ## Fill from Vault
 
 **If** your agent drives the login in its own browser (mid-task prompt, user-owned credentials, custom submit and recovery).
-**Do** make a vault, store a credential item, create the browser **with the vault attached**, open the login page, call `performOperation` with `type: 'fill'`, then submit the form yourself and check the result.
-**Avoid** attaching a vault to a browser that should not see all its items (the attachment is fixed at create); expecting `fill` to navigate, find fields, submit or verify; passing `maxRetries` above 0 on a write into a live form.
-**Source** https://www.kernel.sh/docs/auth/fill-from-vault, https://www.kernel.sh/docs/vaults/fill; verified live.
-
-```ts
-// Vault `vault` holds item 'site-login' (username, password), ready and advertising fill: see
-// references/vaults-payments.md, "Vault fill", for the upsert, the `wait: 60` retrieve and the fill check.
-const browser = await kernel.browsers.create({ vaults: [{ id: vault.id }] });
-try {
-  // ...connectOverCDP and page.goto(LOGIN) as in the Managed Auth example...
-  const result = await kernel.vaults.items.performOperation('site-login', {
-    id_or_name: vault.id, type: 'fill', browser_id: browser.session_id,
-    page_url: LOGIN,                      // exact match: path, query and fragment
-    fields: [{ field: 'username', selector: '#username' }, { field: 'password', selector: '#password' }],
-  }, { maxRetries: 0 });
-  // result.status === 'completed' means written, not logged in. Now click submit yourself.
-} finally {
-  await kernel.browsers.deleteByID(browser.session_id);
-}
-```
-
-Verified live (trimmed):
-
-- `get` and `list` never returned the password; a `sensitive: false` field (the username) comes back with its value, so mark anything private `sensitive: true`.
-- `fill` returned `{ status: 'completed', fields: [{ index, status: 'filled' }, ...] }`, the page stayed on the login URL and nothing was submitted. Read back only the length of the password field, never the value.
-- Failures before any write are **HTTP 400 with `{ code, message }`**, not a 200 with a failed status: `page_not_found` (`page_url` mismatch, even an extra `?x=1`), `element_not_found`, `timeout`. Catch `Kernel.APIError` and branch on `e.status` and `e.error.code`. The docs also describe HTTP 200 with `failed`, `unknown` or `not_attempted` fields when a failure happens after writing starts (not reproduced): inspect the body, not just the status.
-- Retry `fill` only after checking the page, never in a loop. `timeout_ms` is the total deadline (default 10000, max 30000). Your code must authorize the destination page: `fill` does not compare it with the item's site.
-- `fill` does not monitor the session. To reuse the login later, create the browser with a profile and `save_changes: true` (`references/profiles.md`).
-
-Vault caps vary by plan (`kernel org entitlements -o json`). CLI fill: `kernel vaults items invoke <vault> <key> fill --spec-file -` (docs; not run). For end-user collection, create the item without `value`s and give the user `item.action.url` (Kernel-hosted form) only in their private interface; never log it. Secrets in AWS Secrets Manager, Vault or Doppler: your trusted backend copies them into a `provider: 'kernel'` item and updates or deletes it on rotation or revocation; the agent never sees the raw secret (untested; https://www.kernel.sh/docs/vaults/existing-credential-vault, `references/vaults-payments.md`, "Rotating and importing values"). Details and cards/wallets: `references/vaults-payments.md`.
+**Do** follow the one full recipe in `references/vaults-payments.md`, "Vault fill (login)": vault, credential item, browser created with the vault, `performOperation` `fill`, then submit yourself and check the page.
+**Avoid** a second copy of the steps here; attaching a vault to a browser that should not see all its items; treating `completed` as logged in.
+**Source** https://www.kernel.sh/docs/auth/fill-from-vault; verified live. To reuse the login later, create the browser with a profile and `save_changes: true` (`references/profiles.md`).
 
 ## Reuse a Managed Auth credential in your own browser
 
@@ -347,4 +341,4 @@ Vault caps vary by plan (`kernel org entitlements -o json`). CLI fill: `kernel v
 **Avoid** deleting a connection or profile that a real user still needs.
 **Source** verified live. Check with `kernel auth connections list --domain <d> --profile-name <p> -o json`, `kernel credentials list --query <name> -o json`, `kernel profiles list --name <p> -o json` (all `[]`). `kernel vaults get <name>` on a deleted vault prints plain `ERROR: Not_found`.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

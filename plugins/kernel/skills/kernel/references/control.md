@@ -2,6 +2,8 @@
 
 Read this when code or an agent must act on a page, read files out of the VM, or call a site through the browser. Create and delete the browser per `references/browsers.md`; this file is about what you run against it.
 
+Recipes in this file: full-page screenshot (section 2), scrape many elements (section 2, last bullet), download (section 8), upload (section 8).
+
 All code assumes `import Kernel from '@onkernel/sdk'` and `const kernel = new Kernel()` (key from `KERNEL_API_KEY`), and `const id = browser.session_id`.
 
 ## 1. Pick the control surface
@@ -46,13 +48,14 @@ console.log(res.result); // "Example Domain"
 - `await kernel.browsers.playwright.execute(...)` returns the body (`success`, `result`, `error`, ...). `.withResponse()` returns `{ data, response }` and adds the headers and HTTP status; use the plain `await` unless you need those.
 - `timeout_sec`: default 60 (installed types). Documented max 300; the types do not enforce it. Docs suggest 5 s for a read and 10 s for a navigation; raise it for the specific slow step, not everywhere.
 - State: the docs say "a fresh context each time", but `globalThis.x` set in one call was still there in the next call on the same executor. Do not rely on either; return what you need and pass it back in the next call.
-- A `playwright.execute` call is not idempotent. For anything with side effects use `kernel.browsers.playwright.execute(id, params, { maxRetries: 0, timeout: <timeout_sec * 1000 + margin> })`. The SDK default is a 60 s request timeout with 2 retries, which cuts off a long call and re-sends it (default from the SDK source; the `{ maxRetries: 0 }` example is in https://www.kernel.sh/docs/browsers/playwright-execution). The combined `{ maxRetries: 0, timeout }` options on `browsers.create` and on `execute` ran live (success:true in several runs).
-- Wrap every Kernel call in your own timeout guard (`Promise.race`). Scripts that hung and were killed never ran `finally`, and their browsers stayed alive until `timeout_seconds`.
+- A `playwright.execute` call is not idempotent. For anything with side effects use `kernel.browsers.playwright.execute(id, params, { maxRetries: 0, timeout: <timeout_sec * 1000 + margin> })`. The SDK default is a 60 s request timeout (`DEFAULT_TIMEOUT` in `client.js`) with 2 retries (`maxRetries ?? 2`), which cuts off a long call and re-sends it (defaults from the SDK source; the `{ maxRetries: 0 }` example is in https://www.kernel.sh/docs/browsers/playwright-execution). The combined `{ maxRetries: 0, timeout }` options on `browsers.create` and on `execute` ran live (success:true in several runs).
+- For SDK calls the per-request `{ maxRetries: 0, timeout }` option is the guard (the SDK aborts the request when it expires). Use `Promise.race` only for things the SDK does not time out, such as Playwright operations over CDP or reading a `fetch` body. Scripts that hung and were killed never ran `finally`, and their browsers stayed alive until `timeout_seconds`.
 
 **Common recipes inside `playwright.execute`** (each ran live; the `code` string runs in the VM, so `Buffer`, `page`, `context` are VM-side):
 
 ```ts
-// Full-page screenshot back as base64 (785x3409 PNG, 825,606 bytes)
+// Full-page screenshot back as base64 (785x3409 PNG, 825,606 bytes); the file is written on the host running this script, not in the VM
+import { writeFile } from 'node:fs/promises';
 const shot = await kernel.browsers.playwright.execute(
   id,
   {
@@ -81,12 +84,14 @@ const nav = await kernel.browsers.playwright.execute(
 
 - There is no `params` field: the only input is the `code` string. Embed a value as a literal with `JSON.stringify(value)` (also for file contents, section 8). **Never** put page content or untrusted text where code goes, and never concatenate a raw string into `code`.
 - Navigation status: `const r = await page.goto(url); r?.status()` (`null` for some navigations, e.g. same-document). Ran for 200 pages.
-- Error statuses: Playwright's `page.goto` normally resolves on a 4xx/5xx page (Playwright docs; no 4xx run here). Verified exception (headful): `page.goto('https://httpbin.org/status/500')` threw `net::ERR_HTTP_RESPONSE_CODE_FAILURE`, so `execute` returned `success: false` over HTTP 200. That page has an empty body; whether other error pages throw was not tested. Code that needs the reason should catch inside the string:
+- Error statuses: Playwright's `page.goto` normally resolves on a 4xx/5xx page (Playwright docs; no 4xx run here). Verified exception: `page.goto('https://httpbin.org/status/500')` threw `net::ERR_HTTP_RESPONSE_CODE_FAILURE`, so `execute` returned `success: false` over HTTP 200. That page has an empty body; whether other error pages throw was not tested. Code that needs the reason should catch inside the string:
 
 ```ts
 const safeGoto = `try { const r = await page.goto(${JSON.stringify(url)}); return { ok: true, status: r?.status() ?? null }; } catch (e) { return { ok: false, navError: String(e).split('\\n')[0] }; }`;
 ```
 (the catch returned `ok:false` plus the error line instead of failing the run)
+
+- Scrape many elements: `return await page.locator('article h3 a').evaluateAll((els) => els.map((e) => ({ text: e.textContent?.trim(), href: e.href })));` returns one JSON array in a single call, instead of a call per element (unverified: not run live; the selector is a placeholder).
 
 **Avoid** `try { ... } catch` as the only error handling, new code on `connectOverCDP`, and assuming state carries across calls. **Source** https://www.kernel.sh/docs/browsers/playwright-execution.
 
@@ -233,6 +238,7 @@ const bytes = Buffer.from(await resp.arrayBuffer());
 ```
 (poll and read ran live; the click there was a `puppeteer-core` `page.click`, a 36-byte file appeared. A plain `playwright-core` click on the same flow was not re-run clean: untested)
 
+- **File URL only discoverable on a page.** Read the link inside `playwright.execute` (`new URL(await page.locator('a').first().getAttribute('href'), page.url()).href`, resolved against `page.url()`), return it, then fetch it with the `browsers.curl` path above.
 - **Bytes from inside the VM to your machine.** `fs.readFile` (above) for files on the VM disk. For bytes you already hold in `playwright.execute` code, return them as base64 in `result` (ran live: `const resp = await context.request.get(href); const body = await resp.body(); return { status: resp.status(), base64: body.toString('base64') }`, then `Buffer.from(out.base64, 'base64')` locally, 36 bytes). No size limit is documented or measured here; large files: use `fs.readFile`. Take the file name from the page only through `path.basename`, and refuse `''`, `.` and `..`.
 - **Never `fs.createDirectory` the download folder.** It makes root-owned directories (`mode` has no visible effect); Chromium runs as user `kernel`, cannot write there, and cancels the download. Symptom: the folder stays empty, `listFiles` returns null. In-VM `download.saveAs(...)` also failed with "canceled".
 - Default folder `/home/kernel/Downloads` does not exist until Chromium makes it; a missing folder throws 404 "directory not found". An empty existing folder returns `null`, not `[]`: use `?? []`.
@@ -296,8 +302,11 @@ console.log(await f.text());
 **If** you are porting a suite that already speaks Playwright or Puppeteer -> **Do** make the least change: create a Kernel browser, `connectOverCDP`, use the default context, and delete in `finally`:
 
 ```ts
+import Kernel from '@onkernel/sdk';
 import { chromium } from 'playwright-core';
-const browser = await kernel.browsers.create({ headless: true, timeout_seconds: 120 }, { maxRetries: 0 });
+
+const kernel = new Kernel();
+const browser = await kernel.browsers.create({ headless: true, timeout_seconds: 120 }, { maxRetries: 0, timeout: 30_000 });
 try {
   const pw = await chromium.connectOverCDP(browser.cdp_ws_url);
   const context = pw.contexts()[0];
@@ -305,7 +314,10 @@ try {
   // ... the unchanged suite body, using page ...
   await pw.close();                                // disconnects only
 } finally {
-  await kernel.browsers.deleteByID(browser.session_id);
+  // a 404 means the timeout already reaped the browser: that is fine
+  await kernel.browsers.deleteByID(browser.session_id).catch((e) => {
+    if (!(e instanceof Kernel.NotFoundError)) throw e;
+  });
 }
 ```
 (ran live; the try/finally form: a local `chromium.launch` script ported with this diff returned the same 3 titles)
@@ -326,4 +338,4 @@ These are docs-only notes, so each bullet gives the situation, the step and its 
 - Local dev server into the browser: `kernel browsers ssh <id> -R 3000:localhost:3000` (needs `websocat` locally). SSH alone does not count as activity, so create the browser with a long `--timeout` or keep live view open (https://www.kernel.sh/docs/browsers/ssh). Untested.
 - VPN or tunnel in the VM: set `network: { private_hosts: [...] }` at create time; it cannot change later. CIDR rules match literal IPs only, so list private DNS names explicitly (https://www.kernel.sh/docs/browsers/private-networking). Untested.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

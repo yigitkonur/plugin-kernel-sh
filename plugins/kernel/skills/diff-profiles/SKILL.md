@@ -10,6 +10,8 @@ disable-model-invocation: true
 
 Compare what two profiles actually contain, find the state that explains "works on A, fails on B", and report it without printing any value. The argument is the text after the skill name in the user's message (or the line starting ARGUMENTS:): `<profile-a> <profile-b> [issue]`. Profile A is the working baseline, B the broken one. If either profile is missing, ask for it. If the issue is missing, do not ask: default to Cookies, Session Storage, Local Storage and Preferences and proceed.
 
+This skill is user-invoked (`/kernel:diff-profiles <a> <b>`; the model cannot start it). The agent may suggest it when a login works in one profile and not another, then follow these steps by hand if the user asks.
+
 ## Rules
 
 - Never print cookie values, `Login Data` username/password columns, tokens, or storage values. Emit host, name, lengths, counts and presence only.
@@ -83,7 +85,7 @@ For any surface without a block in step 5 (Secure Preferences, Local Extension S
 
 The cookie, storage and extension blocks have been run on two real profiles. Run only the ones the table selected.
 
-**Cookies** (select `length(encrypted_value)`, never `value`; modern Chrome encrypts the value and leaves `value` empty, per the Kernel profile-archive reference skill):
+**Cookies** (select `length(encrypted_value)`, never `value`; modern Chrome encrypts the value and leaves `value` empty, so `length(encrypted_value)` is the only signal):
 
 ```bash
 for s in a b; do
@@ -118,7 +120,7 @@ for f in ss-keys-a ss-keys-b ls-origins-a ls-origins-b; do [ -f "diff/$f.txt" ] 
 [ -f diff/ls-origins-a.txt ] && [ -f diff/ls-origins-b.txt ] && diff diff/ls-origins-a.txt diff/ls-origins-b.txt | head -40
 ```
 
-A storage surface can be present yet yield nothing. In a real run, Session/Local Storage had 6 files per profile and the patterns extracted zero keys on both sides; that cannot tell "the site stores nothing there" from "the pattern missed LevelDB content" (`strings` only sees uncompressed bytes, and `.ldb` blocks may be compressed). So if a surface has files but its key file is empty or missing, never write "no difference". Report `Session Storage: no keys extracted (files present: N)` (same for Local Storage) and fall back to file counts and `du -sk` sizes of the directory on each side, e.g. `for s in a b; do find "$s" -type d -name 'Session Storage' -not -path '*/Extension*' | head -1 | while read -r d; do echo "$s $(ls "$d" | wc -l) files $(du -sk "$d" | cut -f1) KB"; done; done`. Treat a count or size difference as a hint only, and say key names were not compared.
+A storage surface can be present yet yield nothing. In a real run, Session/Local Storage had 6 files per profile and the patterns extracted zero keys on both sides; that cannot tell "the site stores nothing there" from "the pattern missed LevelDB content" (`strings` only sees uncompressed bytes, and `.ldb` blocks may be compressed). So if a surface has files but its key file is empty or missing, never write "no difference". Report `Session Storage: no keys extracted (files present: N)` (same for Local Storage) and fall back to file counts and `du -sk` sizes of the directory on each side, e.g. `for s in a b; do find "$s" -type d -name 'Session Storage' -not -path '*/Extension*' | head -1 | while read -r d; do echo "$s $(ls "$d" | wc -l) files $(du -sk "$d" | cut -f1) KB"; done; done`. Treat a count or size difference as a hint only, and say key names were not compared. How to tell empty from missed: if the directories hold only tiny files (a few KB, the same on both sides), the profiles are probably empty there; if they hold tens of KB or more and still yield 0 keys, the pattern probably missed, so report "not checked" rather than "empty".
 
 If a file was discarded, show neither diff of that pair; report `Session Storage: not checked (value bytes adjacent)` (or `Local Storage: ...`) under "Not checked". `map-N` numbers differ between profiles and mean nothing; the `sed` strips them. Look for auth-shaped keys missing on B (`authCookie`, `sessionGUID`, `*_token`, tenant or account GUIDs).
 
@@ -188,4 +190,4 @@ Workspace: removed | kept at <path>
 Never include values, only names, counts and lengths.
 
 ---
-Verified 2026-10-20 against SDK 0.128.0 / CLI 0.49.0; see the plugin repository's verified-facts.md and ../kernel/references/profiles.md.
+Verified 2026-10-20 against SDK 0.128.0 / CLI 0.49.0; evidence ledger https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md; see also ../kernel/references/profiles.md.

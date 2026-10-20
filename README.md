@@ -15,7 +15,7 @@ or inside Claude Code: `/plugin marketplace add yigitkonur/plugin-kernel-sh`, th
 
 Requirements: macOS or Linux (the hooks are POSIX `sh`; Windows is untested). `jq` is used when present. The workflows use the `kernel` CLI (`brew install kernel/tap/kernel` or `npm i -g @onkernel/cli`); the plugin never installs it for you.
 
-Authenticate the bundled Kernel MCP server once: run `/mcp`, pick `kernel`, and sign in (OAuth; you choose org-wide or one project). Until then it adds no tools and costs nothing.
+Authenticate the bundled Kernel MCP server once: run `/mcp`, pick `kernel`, and sign in with OAuth. Until then it shows as needing authentication and adds no tools. The Bearer-key variant (for CI, or a client that rejects the OAuth flow) was verified live; the interactive OAuth sign-in follows Kernel's documentation but was not completed end-to-end during this plugin's verification (see "Verification status").
 
 ## What you get
 

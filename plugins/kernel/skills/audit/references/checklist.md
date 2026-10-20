@@ -2,6 +2,8 @@
 
 Used by `/kernel:audit`. One row per judgment. Each is: **If** you see this -> **Look for** the evidence -> **Fix** -> **Source**. Report a row only with a `file:line`. Single-regex rules (deprecated names, key literals, logged URLs) come from `kernel-plugin lint` (`rules/stale-api.tsv`); this file covers what the linter misses and how to judge its hits.
 
+Rows written against @onkernel/sdk 0.128.0. A project pinned to an older SDK (for example `^0.96.0`) may differ in field names and defaults: report that as an uncertainty, not a finding.
+
 Severity guide: **high** = leaks money, slots, secrets or data now; **med** = breaks under load or on failure; **low** = hygiene.
 
 | Id | Severity | Situation |
@@ -73,7 +75,7 @@ const done = await kernel.invocations.retrieve(invocation.id); // done.status, d
 
 ## C06. Retries on side-effecting calls
 
-**If** a call that is not idempotent runs under the SDK default (`maxRetries` 2) or inside your own retry loop: `invocations.create`, deploys, REPL / code execution, fill-and-submit, payments, search with cost, browser or pool creation. **Look for** a bare `kernel.invocations.create(params)` with no second argument; `for (let i = 0; i < 3; i++) try { create }`; a `p-retry` or `while (429)` wrapper around those calls. **Fix** pass `{ maxRetries: 0 }` per request; to recover from an ambiguous failure, tag the resource with a run id (`tags`, `name`) and `list` before creating again. **Avoid** counting on an idempotency key: the SDK sends none. The SDK retries connection errors, timeouts, 408, 409, 429 and any status >= 500, so a timed-out invoke can run twice (read from the SDK source; no real 5xx was provoked, so this is unverified). `{ maxRetries: 0 }` on invoke worked without incident. **Source** `../../kernel/references/sdk-client.md`; the shipped SDK `client.js` retry logic.
+**If** a call that is not idempotent runs under the SDK default (`maxRetries` 2, confirmed from SDK source: `client.js` sets `maxRetries ?? 2`) or inside your own retry loop: `invocations.create`, deploys, REPL / code execution, fill-and-submit, payments, search with cost, browser or pool creation. **Look for** a bare `kernel.invocations.create(params)` with no second argument; `for (let i = 0; i < 3; i++) try { create }`; a `p-retry` or `while (429)` wrapper around those calls. **Fix** pass `{ maxRetries: 0 }` per request; to recover from an ambiguous failure, tag the resource with a run id (`tags`, `name`) and `list` before creating again. **Avoid** counting on an idempotency key: the SDK sends none. The SDK retries connection errors, timeouts, 408, 409, 429 and any status >= 500, so a timed-out invoke can run twice (read from the SDK source; no real 5xx was provoked, so this is unverified). `{ maxRetries: 0 }` on invoke worked without incident. **Source** `../../kernel/references/sdk-client.md`; the shipped SDK `client.js` retry logic.
 
 ## C07. Pool reuse after per-user work
 
@@ -140,4 +142,4 @@ A hit inside a comment, a string that documents the old name, or a test fixture 
 
 Docs only, unverified: payments (C09), SDK retry on real 5xx (C06), sync invoke past 100 s (C05), project 403 (C13), duplicate MCP servers (C14), React token flow (C12). Checks C01, C02, C03, C07, C08, C16, C17 and the K003 removal were verified live.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

@@ -4,6 +4,14 @@ Read this when a page returns a challenge, a 403/502, a captcha, or a login that
 
 All code assumes `import Kernel from '@onkernel/sdk'` and `const kernel = new Kernel()` (key from `KERNEL_API_KEY`).
 
+## Baseline before any block
+
+**If** the task says "look as human as possible" or the site is known to defend itself -> **Do** set this up front, before any block appears:
+- headful (the default), the default viewport, and a start at the home page, not a deep link;
+- `stealth: true` (shared ISP proxy plus captcha solver, section 3);
+- a managed proxy of your own only when the site needs a geo or a residential reputation (sections 5 and 6);
+- verify against the site itself (does the real flow complete?), not a fingerprint page: stealth showed no measurable difference on bot.sannysoft.com.
+
 ## 1. New target site: ask the registry before guessing
 
 **If** you are about to automate a site you have not run before -> **Do** (1) open it by hand in a dashboard browser and click through the flow you plan to automate; (2) `kernel.configRegistry.lookup({ url })`; (3) if `recommendation` is null, `resolve({ url, intent })` then `analyses.waitForResult(id, { maxWaitMs })`; (4) create the recommended managed proxy **once**, store its id, reuse it. -> **Avoid** guessing flags; re-running the setup (every run creates another proxy); reading a null `recommendation` as "site unreachable" (it means "no answer yet"); sending URLs with secrets, signed links or GET-triggered actions. -> **Source** https://www.kernel.sh/docs/config-registry.
@@ -204,4 +212,4 @@ await kernel.browsers.create({
 
 Gated or untested: residential, mobile and custom proxies, MITM `ca_bundle`, `proxy_routes`, `browsers.update` proxy swap, stealth plus `mode: 'direct'`, ISP countries other than US, WBA, hCaptcha and Turnstile, `proxies.check` with `url`, GPU (plan-gated), `bypass_hosts`.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
