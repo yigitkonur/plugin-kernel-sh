@@ -4,8 +4,16 @@
   "type": "module",
   "description": "Maintainer smoke tests: re-check the facts this plugin teaches against the live Kernel API.",
   "scripts": {
-    "smoke": "tsx --env-file-if-exists=.env lifecycle.ts && tsx --env-file-if-exists=.env execute-errors.ts && tsx --env-file-if-exists=.env telemetry-after-delete.ts && tsx --env-file-if-exists=.env profile-persist.ts"
+    "smoke": "tsx --env-file-if-exists=.env lifecycle.ts && tsx --env-file-if-exists=.env execute-errors.ts && tsx --env-file-if-exists=.env telemetry-after-delete.ts && tsx --env-file-if-exists=.env profile-persist.ts",
+    "typecheck-snippets": "node ../scripts/typecheck-snippets.mjs"
   },
-  "dependencies": { "@onkernel/sdk": "latest" },
-  "devDependencies": { "@types/node": "latest", "tsx": "latest", "typescript": "latest" }
+  "dependencies": {
+    "@onkernel/sdk": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "tsx": "latest",
+    "typescript": "latest",
+    "playwright-core": "latest"
+  }
 }

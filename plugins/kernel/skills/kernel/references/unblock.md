@@ -1,6 +1,6 @@
 # Unblock: when a site blocks, challenges or throttles you
 
-Read this when a page returns a challenge, a 403/502, a captcha, or a login that keeps failing from Kernel. Work the ladder in order and stop at the first rung that holds; each rung costs more than the last. `kernel org entitlements -o json` tells you which rungs your plan has (see `references/browsers.md`).
+Read this when a page returns a challenge, a 403/502, a captcha, or a login that keeps failing from Kernel. Work the ladder in order and stop at the first rung that holds; each rung costs more than the last. `kernel org entitlements -o json` tells you which rungs your plan has (flags in `references/api-map.md`).
 
 All code assumes `import Kernel from '@onkernel/sdk'` and `const kernel = new Kernel()` (key from `KERNEL_API_KEY`).
 
@@ -25,7 +25,7 @@ console.log(result.analysis?.status, result.recommendation?.type, Boolean(result
 
 - A wait timeout stops waiting; it does not cancel the analysis. Terminal statuses: `completed`, `failed`, `canceled`, `expired`.
 - Judge a recommendation by its evidence (success rate, sample size, last observed), not by its existence. `guidance` can be useful even when nothing worked.
-- Add `intent` (one sentence, https only) when the first page loading is not enough; add `allowed_proxy_countries` when the workload must exit from specific countries.
+- Add `intent` (a sentence or two; the target url must be https) when the first page loading is not enough; add `allowed_proxy_countries` when the workload must exit from specific countries.
 - Hobbyist plan and up. Lab: lookup for bot.sannysoft.com returned null; for the reCAPTCHA demo it returned a recommendation with a managed proxy and 1 working configuration.
 
 ## 2. Blocked: the escalation ladder
@@ -34,7 +34,7 @@ console.log(result.analysis?.status, result.recommendation?.type, Boolean(result
 
 | Step | Change | Why / when |
 |---|---|---|
-| 1 | Headful, default viewport, start at the home page and click through | Cheapest; most "blocks" are a deep link, a headless flag or a custom viewport |
+| 1 | Headful, default viewport, start at the home page and click through | Cheapest; common causes are a deep link, a headless flag or a custom viewport |
 | 2 | `stealth: true` | Adds the shared ISP proxy and the captcha solver (section 3) |
 | 3 | A profile plus the same dedicated ISP proxy every run, or a pool | Returning-user signal; stable IP (sections 5 and 6) |
 | 4 | Residential proxy | Geo needs, or fingerprint-heavy vendors where the network layer is not the main signal |
@@ -60,7 +60,7 @@ console.log(result.analysis?.status, result.recommendation?.type, Boolean(result
 | `{ proxy: { id } }` | Your proxy | No | `{ id }` |
 
 - The anti-detection Chromium baseline is on for every browser. `stealth` adds the proxy and the solver; `proxy` changes egress only and never toggles the solver.
-- Egress IPs seen: stealth default 109.72.123.x then 94.103.x (two sessions, two IPs); `proxy: { mode: 'direct' }` a different IP; `proxy: { id }` exactly the proxy's `ip_address`.
+- Egress seen live: the stealth default gave a different IP in each of three sessions; `proxy: { mode: 'direct' }` gave yet another; `proxy: { id }` gave exactly the proxy's `ip_address`.
 - **Avoid** assuming stealth removes bot detection by itself: lab P12 could not show a fingerprint difference on bot.sannysoft.com between stealth and non-stealth (the page exposes no failed rows, so that evidence is weak both ways). Test your real target.
 - **Source** `BrowserProxyConfig` in the installed SDK types, https://www.kernel.sh/docs/browsers/bot-detection/stealth, labs P12 and P14.
 
@@ -79,8 +79,9 @@ const b = await kernel.browsers.create({ stealth: true, proxy: { mode: 'direct' 
 
 ```ts
 const proxy = await kernel.proxies.create({ type: 'isp', name: 'my-site-isp' }); // country defaults to US
-const checked = await kernel.proxies.check(proxy.id);   // returns the proxy: ip_address, status 'available'
-const browser = await kernel.browsers.create({ proxy: { id: proxy.id } });
+const proxyId = proxy.id!;                                // typed optional in the response
+const checked = await kernel.proxies.check(proxyId);      // returns the proxy: ip_address, status 'available'
+const browser = await kernel.browsers.create({ proxy: { id: proxyId } });
 // ... drive it; the egress IP equals proxy.ip_address
 await kernel.browsers.deleteByID(browser.session_id);
 ```
@@ -106,6 +107,7 @@ const b = await kernel.browsers.create({ proxy: { id: res.id } });
 **If** a captcha appears and you use stealth -> **Do** wait; do not touch the widget. Tell a computer-use loop: "If you see a CAPTCHA or similar test, just wait for it to get solved automatically." For a deterministic wait, enable captcha telemetry and gate on the events plus a page check. For Cloudflare, continue after the "Ready" message appears. -> **Avoid** clicking the checkbox (lab: the script never touched it and the solver ticked the box and set the token); treating a solver `success` as "page cleared" (verify the page); assuming hCaptcha works (beta, per org, ask support); expecting the solver without `stealth: true` (lab: a non-stealth browser stayed unchecked, 0 captcha events, page said "Please verify that you are not a robot"). -> **Source** https://www.kernel.sh/docs/browsers/bot-detection/stealth, https://www.kernel.sh/docs/browsers/telemetry/pausing-for-captcha-solves, lab P13.
 
 ```ts
+// untested as written
 const browser = await kernel.browsers.create({
   stealth: true,
   headless: false,
@@ -119,15 +121,15 @@ for await (const frame of stream as AsyncIterable<any>) {
   console.log(ev.type, ev.data?.status, ev.data?.task_id);
 }
 ```
-(trimmed from lab-runs/P13/p13-captcha-stealth.ts; the unwrap was confirmed from live frames, the loop itself there matched on raw text)
+(hand-written from the probe's live frame dump; the unwrap was confirmed from live frames, but this loop is untested as written. The lab probe matched on raw text.)
 
 What the lab saw on the reCAPTCHA v2 demo (stealth, headful): `captcha_solve_started` (task_kind `image_challenge`), `captcha_solve_result` (status `success`, `duration_ms` about 1.3 s), `captcha_challenge_result` (status `solved`). The page then said "Verification Success". Time from navigation to token varied 5 s, 30 s and 68 s across three runs, so give the wait a deadline of a couple of minutes, not seconds.
 
 - **Wrapped frames refute the SDK types**: the types declare `category`/`type`/`data` at the top of each stream frame, live frames nest them under `event`. Filtering on the top level silently matches nothing.
 - Join a start to its result on `task_id` only. Delivery is best-effort and unordered, so every wait needs a deadline and a fallback to reading the page.
-- `captcha_type` is deprecated: on solve events it read `other`; use `captcha_provider` (`recaptcha_v2`) and `task_kind`.
+- Use `captcha_provider` (`recaptcha_v2`) and `task_kind`. **Avoid** `captcha_type`: deprecated, and on solve events it read `other`.
 - The stream ends with `TypeError: terminated` when the browser is deleted. Catch it.
-- Server-side filtering: `browsers.telemetry.events(id, { type: [...] })` filters; the stream's `type` option is not applied server-side. In the CLI use `kernel browsers telemetry events <id> --types captcha_solve_result --limit 20 -o json` (flags per `references/api-map.md`).
+- Server-side filtering: `browsers.telemetry.events(id, { type: [...] })` filters; the stream's `type` option is not applied server-side. In the CLI use `kernel browsers telemetry events <id> --categories captcha --limit 20 -o json` (server-side; `events --types` filters client-side and walks every page) (flags per `references/api-map.md`).
 - With an egress allowlist, also allow the captcha provider hosts, or the challenge cannot load (reCAPTCHA: `www.google.com`, `www.gstatic.com`; hCaptcha: `hcaptcha.com`, `*.hcaptcha.com`; Turnstile: `challenges.cloudflare.com`; hosts can change).
 - Not tested: hCaptcha, Turnstile, press-and-hold.
 
@@ -158,13 +160,13 @@ const code = response?.headers()['x-kernel-proxy-error'];
 
 **If** the target is a bank, brokerage, payment processor, national postal service, government site or a bare IP and the Kernel proxy fails -> **Do** treat it as a provider restriction, not an outage: try direct egress (`proxy: { mode: 'direct' }` or non-stealth) or a custom proxy of your own; for `.gov` try residential as in section 8. -> **Avoid** retrying the same managed proxy or filing it as a Kernel incident. A documented business need can be sent to security@kernel.sh as an exception request (not guaranteed). -> **Source** https://www.kernel.sh/docs/acceptable-use (restricted destinations; the table is indicative, not exhaustive).
 
-- Lab refuted the blanket claim: a stealth browser on the default proxy loaded https://www.usa.gov (status 200, no proxy-error header). The docs say the default provider carries some `.gov` hosts and returns 502 on the rest, so test your host and branch on the header.
+- Lab refuted the blanket claim: a stealth browser on the default proxy loaded https://www.usa.gov (status 200, no proxy-error header). The ISP proxy docs (https://www.kernel.sh/docs/proxies/isp) say the default provider carries some `.gov` hosts and returns 502 on the rest, so test your host and branch on the header.
 - Restricted destinations are not prohibited by the policy; Kernel's browser-level anti-detection works with or without a Kernel proxy.
 - A proxy outside Kernel's network means your provider's rules apply instead (section 11).
 
 ## 10. Per-host routing
 
-**If** one site needs a different egress than the rest of the session (e.g. direct for an internal host, residential for one target) -> **Do** set `network.proxy_routes` at create: list the apex and the wildcard (`*.example.com` does not match `example.com`); exact host beats wildcard, longer suffix beats shorter. A route whose proxy disappears fails closed. -> **Avoid** adding routes after create (create-only); routes needing `proxy v3` that you have not confirmed on your project. -> **Source** `BrowserNetworkConfig.proxy_routes` in the SDK types; CLI `kernel browsers create --proxy-route 'HOST[,HOST]=PROXY_ID'` (max 10 routes, 50 hosts each; `id:ID` or `name:NAME` prefixes). (unverified live: not run in the lab.)
+**If** one site needs a different egress than the rest of the session (e.g. direct for an internal host, residential for one target) -> **Do** set `network.proxy_routes` at create: list the apex and the wildcard (`*.example.com` does not match `example.com`); exact host beats wildcard, longer suffix beats shorter. A route whose proxy disappears fails closed. -> **Avoid** adding routes after create (create-only). -> **Source** `BrowserNetworkConfig.proxy_routes` in the SDK types; CLI `kernel browsers create --proxy-route 'HOST[,HOST]=PROXY_ID'` (max 10 routes, 50 hosts each; `id:ID` or `name:NAME` prefixes). (unverified live: not run in the lab.)
 
 ```ts
 // untested
@@ -182,11 +184,11 @@ await kernel.browsers.create({
 
 | Do not use | Use instead | Lab |
 |---|---|---|
-| `proxy_id` on `browsers.create`/`update` | `proxy: { id }` | Still accepted (no error), response echoed `proxy: { id }`; deprecated in the SDK |
+| `proxy_id` on `browsers.create`/`update` | `proxy: { id }` | On create: still accepted (no error), response echoed `proxy: { id }`; deprecated in the SDK; update not run |
 | `disable_default_proxy` on create | `proxy: { mode: 'direct' }` | Accepted but did NOT produce direct egress (response `proxy.mode` stayed `default`, egress stayed a pool IP) |
 | `proxy: { type: 'datacenter' }` / datacenter proxies | `type: 'isp'` | 400 "provide exactly one of proxy.mode, proxy.id, or proxy.name" (message does not mention `type`) |
 
-**Source** `@deprecated` tags in the SDK types, https://www.kernel.sh/docs/changelog, lab P14. Kernel's own docs prose and sample skills still show `proxy_id`/`disable_default_proxy`; the types and the lab win.
+**Source** `@deprecated` tags in the SDK types, https://www.kernel.sh/docs/changelog, lab P14. Note: Kernel's own docs prose and sample skills still show `proxy_id`/`disable_default_proxy`; the types and the lab win.
 
 ## 12. Swapping a proxy mid-session
 
@@ -200,6 +202,4 @@ await kernel.browsers.create({
 
 **If** API or CLI help says "mobile > residential > isp" -> **Do** follow the guides: start with ISP (static IP on a residential ASN), move to residential only for geo or fingerprint-heavy vendors, mobile last. -> **Avoid** picking the "strongest" type first; it is slower and rotates. -> **Source** https://www.kernel.sh/docs/browsers/bot-detection/overview ("Start with ISP"), https://www.kernel.sh/docs/proxies/overview. (The two statements cannot both be right; the docs' ordering is a recommendation, not measured here.)
 
-## Verified in lab
-
-Verified in lab: 2026-10-20, @onkernel/sdk 0.127.0, kernel CLI 0.49.0, Hobbyist plan. Probes: P12 partial (config registry lookup and resolve+waitForResult confirmed; stealth vs direct create shapes and egress confirmed; fingerprint difference on bot.sannysoft.com unclear), P13 confirmed (solver on stealth, none without, wrapped stream frames refuted the SDK types), P14 confirmed (ISP create/check/delete, `proxy: { id | mode }`, allowlist 403 without throw) with refuted rows (`disable_default_proxy` on create gives no direct egress, `datacenter` rejected, usa.gov not blocked), LEAD (GPU 403 on Hobbyist, telemetry filters). Gated or untested: residential, mobile and custom proxies, MITM `ca_bundle`, `proxy_routes`, `browsers.update` proxy swap, stealth plus `mode: 'direct'`, ISP countries other than US, WBA, hCaptcha and Turnstile, `proxies.check` with `url`, GPU (plan-gated), `bypass_hosts`.
+> Verified in lab: 2026-10-20, Hobbyist plan, @onkernel/sdk 0.127.0 (types re-checked on 0.128.0). Probes: P12 partial (config registry lookup and resolve+waitForResult confirmed; stealth vs direct create shapes and egress confirmed; fingerprint difference on bot.sannysoft.com unclear), P13 confirmed (solver on stealth, none without, wrapped stream frames refuted the SDK types), P14 confirmed (ISP create/check/delete, `proxy: { id | mode }`, allowlist 403 without throw) with refuted rows (`disable_default_proxy` on create gives no direct egress, `datacenter` rejected, usa.gov not blocked), LEAD (GPU 403 on Hobbyist, telemetry filters). Gated or untested: residential, mobile and custom proxies, MITM `ca_bundle`, `proxy_routes`, `browsers.update` proxy swap, stealth plus `mode: 'direct'`, ISP countries other than US, WBA, hCaptcha and Turnstile, `proxies.check` with `url`, GPU (plan-gated), `bypass_hosts`.

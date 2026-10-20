@@ -26,7 +26,7 @@ Vault fill was run live (probe P11). **Payments were never run in the lab** (rea
 5. Submit the form yourself, then check the page for a logged-in signal.
 
 ```ts
-// from lab P11 01/02 (trimmed; secrets come from your backend, never literals in code)
+// untested as written: adapted from lab P11 01/02 (names changed, trimmed; secrets come from your backend, never literals in code)
 const vault = await kernel.vaults.upsert({ name: 'user-12345' });
 await kernel.vaults.items.upsert('portal-login', {
   id_or_name: vault.id,
@@ -77,7 +77,7 @@ try {
 | `page_url` not an exact match of the open page (even `?x=1` added) | HTTP 400, `code: 'page_not_found'`, "no fields were written" | Open the page at the exact URL, retry once |
 | Selector matches nothing | HTTP 400, `code: 'element_not_found'` | Fix the selector; password length on the page stayed 0 |
 | `timeout_ms` too small (tested `1`) | HTTP 400, `code: 'timeout'`, nothing written | Raise `timeout_ms` (default 10000, max 30000, total not per field) |
-| Failure after writing started | Docs: HTTP 200 with `status: 'failed' \| 'unknown'` and per-field `filled / failed / unknown / not_attempted` (unverified: not reproduced in the lab) | Read the body, not just the status; earlier writes are not rolled back |
+| Failure after writing started | Docs: known execution failures can return HTTP 200 with `status: 'failed'` or `'unknown'`, with per-field `filled / failed / unknown / not_attempted`; whether this happens only after writing started is our inference from "earlier writes aren't rolled back" (unverified: not reproduced in the lab) | Read the body, not just the status; earlier writes are not rolled back |
 
 ```ts
 // from lab P11 03: error shape
@@ -87,7 +87,7 @@ try { /* performOperation(...) */ } catch (e) {
 }
 ```
 
-**Do** retry a fill only after looking at the page and never in a loop; `fill` never submits, so one retry is safe, and a `totp` field gets a fresh code. **Avoid** SDK default retries on this call (`performOperation` already sends `maxRetries: 0` in 0.127.0 source; keep it explicit). **Source** https://www.kernel.sh/docs/vaults/fill, lab P11 (03, 05).
+**Do** retry a fill only after looking at the page and never in a loop; `fill` never submits, so one retry is safe, and a `totp` field gets a fresh code. **Avoid** SDK default retries on this call (`performOperation` already sends `maxRetries: 0` in `@onkernel/sdk` 0.128.0 source (ref copy, `items.ts:178`); keep it explicit). **Source** https://www.kernel.sh/docs/vaults/fill, lab P11 (03, 05).
 
 ### Rotating and importing values
 
@@ -124,7 +124,7 @@ Keep the vault id, card key, browser id and last event id until reconciled. **So
 ### Wallet setup (one wallet per provider per vault)
 
 **If** the user connects a payment method
-**Do** list the vault's items and group wallets by `spec.provider`: none -> offer to connect; `pending_authorization` -> resume the existing hosted action; `connected` -> reuse. Re-check immediately before creating. Wait for `connected` before preparing a purchase. Present the hosted action URL from your own authenticated endpoint (bound to user, vault, item; short TTL; `Cache-Control: no-store`, `Referrer-Policy: no-referrer`).
+**Do** list the vault's items and group wallets by `spec.provider`: none -> offer to connect; `pending_authorization` -> resume the existing hosted action; `connected` -> reuse. Re-check immediately before creating. Wait for `connected` before preparing a purchase. Present the hosted action URL from your own authenticated endpoint (bound to user, vault, item; short TTL; our recommendation: `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, as the docs require on the redirect response in https://www.kernel.sh/docs/browsers/enable-payments-in-browser-agent).
 **Avoid** a second wallet under a different key (the API makes item keys unique, not providers); deleting a wallet (it invalidates its cards); letting the agent or its browser see the action URL.
 **Source** https://www.kernel.sh/docs/integrations/wallets/overview
 
@@ -148,7 +148,7 @@ Choose by the lifecycle, not the merchant processor; only AgentCard's alias hand
 - `fill` on a different origin than the one you authorized at (403 `destination_denied`); a path change on the same origin is fine, but `page_url` must be the exact current page.
 - Repeating `authorize` or creating a replacement card to retry an unknown purchase. After approval is requested, `authorize` only re-checks. After an authorize with a checkout, spec updates return 409: delete and recreate (only if no purchase may have happened).
 - Inspecting or invoking the checkout's WebMCP tools yourself (Kernel does it during authorize and fill).
-- Stripe adaptive pricing: build the spec from the active presentment amount and currency the user saw, not the base price.
+- Stripe adaptive pricing (https://www.kernel.sh/docs/browsers/enable-payments-in-browser-agent): build the spec from the active presentment amount and currency the user saw, not the base price.
 
 Authorize errors that leave the card `requested` and safe to authorize again: `page_not_found` (open the checkout at exactly `page_url`), `ambiguous_page` (close extra tabs), `browser_not_found / browser_unavailable / destination_denied / timeout / browser_error` (browser exists in this project, has the vault, is not busy, checkout open in one tab).
 **Source** https://www.kernel.sh/docs/integrations/wallets/stripe-link
@@ -178,7 +178,7 @@ Authorize errors that leave the card `requested` and safe to authorize again: `p
 |---|---|---|---|
 | You need your own OAuth client for Link or AgentCard | Create a provider config (`kernel vault-provider-configs`, SDK `vaultProviderConfigs`) with an **org-scoped** key; pick exactly one config `id` or `name` per wallet | Project-scoped key (403); changing a bound config (immutable; new config means new wallets); deleting one still referenced (409). Default to Kernel-managed credentials | https://www.kernel.sh/docs/integrations/wallets/overview |
 | Kernel-managed Visa cards (`provider: 'kernel'`) | CLI or MCP only today: wallet enroll, purchase request, then report with `confirm_transaction`, recover with `restart_verification` | Assuming the docs' Link/AgentCard checkout flow applies (the SDK types include a `kernel` card state, but no flow was run or documented beyond the changelog) | https://www.kernel.sh/docs/changelog (October 16) |
-| The agent should buy a Kernel browser with no account | MPP: `curl -i -X POST https://api.onkernel.com/mpp/browsers` shows the `402` offer; pay with Stripe's `link-cli mpp pay`; on a lost response retry with the **same** payment credential | Treating MPP as a merchant checkout (it buys browser access only, no vault); a second payment to recover an uncertain purchase; logging the returned `cdp_ws_url` | https://www.kernel.sh/docs/info/mpp |
+| The agent should buy a Kernel browser with no account | MPP: `curl -i -X POST https://api.onkernel.com/mpp/browsers` shows the `402` offer (docs only, not run); pay with Stripe's `link-cli mpp pay`; on a lost response retry with the **same** payment credential | Treating MPP as a merchant checkout (it buys browser access only, no vault); a second payment to recover an uncertain purchase; logging the returned `cdp_ws_url` | https://www.kernel.sh/docs/info/mpp |
 
 ## Operating notes
 
@@ -189,6 +189,6 @@ Authorize errors that leave the card `requested` and safe to authorize again: `p
 
 ## Contradictions to know
 
-- Docs say a fill failure returns HTTP 200 with `failed`. Lab: pre-write validation failures (`page_not_found`, `element_not_found`, `timeout`) are HTTP 400 with `{ code, message }` and nothing is written. Branch on both.
+- Docs say known execution failures can return HTTP 200 with `failed` or `unknown`; they do not describe pre-write validation errors. Lab: pre-write validation failures (`page_not_found`, `element_not_found`, `timeout`) are HTTP 400 with `{ code, message }` and nothing is written. Branch on both.
 
-Verified in lab: 2026-10-20, @onkernel/sdk 0.127.0, kernel CLI 0.49.0. Probes: P11 vault fill (confirmed: upsert and list never return secrets; fill into an attached browser; page_url mismatch, bad selector and tiny timeout return 400 with code; cleanup). NOT tested: the HTTP 200 per-field `failed / not_attempted` branch, attaching a vault by `name`, CLI `items invoke ... fill`, a non-editable fill target, TOTP fill, credential update, 1Password, hosted `collect` flow, provider configs, MPP, and every payment path (Link authorize/fill, AgentCard aliases and observer, `prepare_checkout`, `recovery_required`, Visa cards), which are docs-only because payments spend real money.
+> Verified in lab: 2026-10-20, card L4. Probes: P11 vault fill (confirmed: upsert and list never return secrets; fill into an attached browser; page_url mismatch, bad selector and tiny timeout return 400 with code; cleanup). NOT tested: the HTTP 200 per-field `failed / not_attempted` branch, attaching a vault by `name`, CLI `items invoke ... fill`, a non-editable fill target, TOTP fill, credential update, 1Password, hosted `collect` flow, provider configs, MPP, and every payment path (Link authorize/fill, AgentCard aliases and observer, `prepare_checkout`, `recovery_required`, Visa cards), which are docs-only because payments spend real money.

@@ -2,7 +2,7 @@
 
 Read this when a task needs a site where someone is signed in. Pick one path first, then read only that section.
 
-Rule zero still applies: if the site has an API or an MCP server, use it and skip the login (https://www.kernel.sh/docs/overview/why-kernel).
+Docs: "If the task can be done through an API or an MCP server, use that instead." (https://www.kernel.sh/docs/overview/why-kernel). Check that the API covers the work before you skip the login.
 
 ## Pick the path
 
@@ -35,7 +35,7 @@ await kernel.credentials.create({
   values: { username: process.env.SITE_USER!, password: process.env.SITE_PASSWORD! },
 });
 
-// 2. One connection per domain + profile. The profile is created if missing.
+// 2. One connection per domain + profile.
 const conn = await kernel.auth.connections.create({
   domain: 'example.com',
   profile_name: 'acme-profile',
@@ -59,7 +59,8 @@ if (done.status !== 'AUTHENTICATED') throw new Error(`login ended ${done.flow_st
 const browser = await kernel.browsers.create({ profile: { name: 'acme-profile' } });
 try {
   const pw = await chromium.connectOverCDP(browser.cdp_ws_url);
-  const page = (pw.contexts()[0] ?? (await pw.newContext())).pages()[0] ?? (await pw.contexts()[0].newPage());
+  const context = pw.contexts()[0];                      // the profile lives in the default context
+  const page = context.pages()[0] ?? (await context.newPage());
   await page.goto('https://example.com/account');
   await pw.close();
 } finally {
@@ -71,7 +72,7 @@ The shape above is trimmed from lab P10 (`p10-01` to `p10-06`, all ran). Lab res
 
 - With a stored credential, `login` then `follow` reached `AUTHENTICATED` with no human (flow `IN_PROGRESS/DISCOVERING`, then `SUCCESS/COMPLETED`). A browser on the profile opened the protected page logged in; the same page without the profile redirected to the login page (P10).
 - A new connection starts `NEEDS_AUTH` with `can_reauth: false` (reason `no_prior_successful_login`). It only becomes eligible for automatic reauth after one successful login (P10).
-- `follow` heartbeats arrive as event name `sse_heartbeat`, but the SDK type says `heartbeat`. Filter on `ev.event === 'managed_auth_state'` and ignore the rest; do not branch on the heartbeat name (P10).
+- `follow` heartbeats arrive as event name `sse_heartbeat`, and the SDK types it the same way (SDK 0.128.0). Filter on `ev.event === 'managed_auth_state'` and ignore the rest; do not branch on the heartbeat name (P10).
 - Stream ends when the flow succeeds, fails, expires or is canceled. A hosted session expires after 20 minutes and waits 10 minutes for user input (https://www.kernel.sh/docs/auth/hosted-ui, untested).
 - `post_login_url` on the connection says where the login landed; start from it (https://www.kernel.sh/docs/auth/configuration).
 - A profile can hold one connection per domain, so one profile per end user covers all that user's sites (https://www.kernel.sh/docs/auth/faq).
@@ -176,7 +177,10 @@ A field with `reason: 'rejected'` means the site refused the previous value; ask
 | `website_error` | Usually the site; Kernel already retried once. Try later; check `login_url`. |
 | `unsupported_auth_method` | Passkey-only is unsupported; switch the account to password plus TOTP. |
 
-Proxy for blocked logins: set it on the connection's own browser config, not on your task browser, because the login runs in a browser Kernel starts.
+**If** a login keeps ending `bot_detected` or `captcha_blocked`.
+**Do** set the proxy on the connection's own browser config (`browser.proxy`); the login runs in a browser Kernel starts.
+**Avoid** the deprecated top-level `proxy` field; relying on a proxy set on your task browser.
+**Source** https://www.kernel.sh/docs/auth/configuration#custom-proxy.
 
 ```ts
 // untested: shape from the SDK types (ManagedAuthBrowserConfig.proxy is BrowserProxyConfig: id | name | mode)
@@ -185,7 +189,7 @@ await kernel.auth.connections.update(conn.id, { browser: { proxy: { id: proxy.id
 await kernel.auth.connections.login(conn.id);
 ```
 
-Avoid the top-level `proxy` field on connection create, update and login (the docs prose still shows it): the SDK types mark it deprecated in favor of `browser.proxy`. A proxy passed to `browsers.create` does not affect the login browser. Residential proxies rotate the exit IP per session, which can itself look suspicious on reauth, so prefer ISP or custom (see `references/unblock.md`).
+Avoid the top-level `proxy` field on connection create, update and login (the docs prose still shows it): the SDK types mark it deprecated in favor of `browser.proxy`. A proxy passed to `browsers.create` is assumed not to affect the login browser (untested). Docs on residential proxies: "New connections may use a different exit IP because of failover, routing updates, sticky-session expiry, or residential device availability." A changing IP may look suspicious on reauth (inference), so prefer ISP or custom (see `references/unblock.md`).
 
 ## MFA
 
@@ -233,6 +237,7 @@ const conn = await kernel.auth.connections.create({
 **Source** lab P10 `p10-04`.
 
 ```ts
+// untested: only the 409 status and body keys ran in P10; the retrieve step and the catch were not run
 try {
   conn = await kernel.auth.connections.create({ domain, profile_name });
 } catch (e) {
@@ -333,6 +338,13 @@ Keep the source id next to the Kernel vault and item ids in your backend for rot
 
 ## Cleanup
 
-Delete what you made when the run is one-shot: `kernel.auth.connections.delete(id)`, `kernel.credentials.delete(name)`, `kernel.profiles.delete(name)`, and for vaults `kernel.vaults.items.delete(key, { id_or_name })` then `kernel.vaults.delete(name)`. The lab checked each is gone with `kernel auth connections list --domain <d> --profile-name <p> -o json`, `kernel credentials list --query <name> -o json` and `kernel profiles list --name <p> -o json`, all returning `[]` (P10, P11). `kernel vaults get <name>` on a deleted vault prints plain text `ERROR: Not_found`, not JSON. Do not delete a connection or profile that a real user still needs.
+**If** the run was one-shot and you created the connection, credential, profile or vault.
+**Do** delete them: `kernel.auth.connections.delete(id)`, `kernel.credentials.delete(name)`, `kernel.profiles.delete(name)`, and for vaults `kernel.vaults.items.delete(key, { id_or_name })` then `kernel.vaults.delete(name)`.
+**Avoid** deleting a connection or profile that a real user still needs.
+**Source** lab P10, P11 (procedure; no docs page cited).
 
-Verified in lab: 2026-10-20, @onkernel/sdk 0.127.0, kernel CLI 0.49.0. Probes: P10 confirmed (credential create without echo, connection create and health-check options, `login`, `follow` to AUTHENTICATED, 409 `existing_id` body, `login` supersedes a live flow, `timeline`, profile browser opens the protected page, cleanup); P11 confirmed (vault and item upsert without secret echo, `fill` completed and not submitted, 400 `page_not_found` / `element_not_found` / `timeout`, cleanup). NOT tested: React embed, programmatic `submit` and choices (`AWAITING_INPUT` never occurred), any `error_code` failure path, TOTP, health-check runs, auto-reauth and the `NEEDS_AUTH` recovery, the saved-check-URL pre-task verify, `timeline` types `reauth` and `health_check`, whether a superseded `hosted_url` is dead, 200-after-write `fill` outcomes, vault attach by `{ name }`, `fill` through the CLI, `managed_auth` and 1Password providers, `browser.proxy` on a connection, creating a connection through the CLI.
+The lab checked each is gone with `kernel auth connections list --domain <d> --profile-name <p> -o json`, `kernel credentials list --query <name> -o json` and `kernel profiles list --name <p> -o json`, all returning `[]` (P10, P11). `kernel vaults get <name>` on a deleted vault prints plain text `ERROR: Not_found`, not JSON.
+
+## Verified in lab
+
+Verified in lab: 2026-10-20, kernel CLI 0.49.0; the SDK version the probes ran with was not recorded (the installed copy is 0.128.0). Probes: P10 confirmed (credential create without echo, connection create and health-check options, `login`, `follow` to AUTHENTICATED, 409 `existing_id` body, `login` supersedes a live flow, `timeline`, profile browser opens the protected page, cleanup); P11 confirmed (vault and item upsert without secret echo, `fill` completed and not submitted, 400 `page_not_found` / `element_not_found` / `timeout`, cleanup). NOT tested: React embed, programmatic `submit` and choices (`AWAITING_INPUT` never occurred), any `error_code` failure path, TOTP, health-check runs, toggling `health_checks` via `update`, auto-reauth and the `NEEDS_AUTH` recovery, the saved-check-URL pre-task verify, `timeline` types `reauth` and `health_check`, whether a superseded `hosted_url` is dead, 200-after-write `fill` outcomes, vault attach by `{ name }`, `fill` through the CLI, `managed_auth` and 1Password providers, `browser.proxy` on a connection, creating a connection through the CLI.

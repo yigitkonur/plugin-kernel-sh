@@ -1,6 +1,6 @@
 # Profiles: state that must outlive a browser
 
-Browsers are disposable. A profile is the only thing that carries cookies, local storage, open tabs and Chromium preferences from one browser to the next (https://www.kernel.sh/docs/browsers/profiles). Read this before you write any code that logs in once and expects to stay logged in, or that runs more than one browser against the same identity.
+A profile persists cookies, site data, open tabs and preferences across browser sessions (https://www.kernel.sh/docs/browsers/profiles). Read this before you write any code that logs in once and expects to stay logged in, or that runs more than one browser against the same identity.
 
 ## The model in five lines
 
@@ -18,7 +18,7 @@ Browsers are disposable. A profile is the only thing that carries cookies, local
 **Source** https://www.kernel.sh/docs/browsers/profiles, https://www.kernel.sh/docs/browsers/profiles/save-and-reuse, lab P09
 
 ```ts
-// lab-runs/P09/profile-session.ts (trimmed): one writer, delete in finally
+// lab P09 (trimmed): one writer, delete in finally
 import Kernel from '@onkernel/sdk';
 const kernel = new Kernel();
 const browser = await kernel.browsers.create({
@@ -27,7 +27,7 @@ const browser = await kernel.browsers.create({
 });
 try {
   const res = await kernel.browsers.playwright.execute(browser.session_id, { code, timeout_sec: 60 });
-  if (!res.success) throw new Error(res.error ?? 'execute failed');
+  console.log(`success=${res.success} error=${res.error ?? ''}`);
 } finally {
   await kernel.browsers.deleteByID(browser.session_id); // this is the save
 }
@@ -56,7 +56,7 @@ try {
 }
 ```
 
-CLI: `kernel profiles create --name my-profile`, `kernel browsers create --profile-name my-profile --save-changes` (flags from ref/kernel-cli `cmd/profiles.go` and `cmd/browsers.go`; `--profile-id` is the alternative and the two are mutually exclusive).
+CLI: `kernel profiles create --name my-profile`, `kernel browsers create --profile-name my-profile --save-changes` (flags from the CLI source, https://github.com/kernel/kernel-cli, `cmd/profiles.go` and `cmd/browsers.go`; `--profile-id` is the alternative and the two are mutually exclusive).
 
 ## Many workers, same login
 
@@ -83,7 +83,7 @@ const browser = await kernel.browsers.create({
 ## Concurrent tasks for one user
 
 **If** several tasks act as the same user at the same time
-**Do** run one profiled browser and give each task its own tab through a named Playwright executor (`references/control.md`). Tabs share a live cookie jar and persistent origin storage; `sessionStorage` stays per tab. For tab-heavy work on a headful non-GPU browser the docs suggest `memory: '16GiB'` over the `8GiB` default.
+**Do** run one profiled browser and give each task its own tab through a named Playwright executor (https://www.kernel.sh/docs/introduction/control). Tabs share a live cookie jar and persistent origin storage; `sessionStorage` stays per tab. For tab-heavy work on a headful non-GPU browser the docs suggest `memory: '16GiB'` over the `8GiB` default.
 **Avoid** one browser per task from the same profile: each loads a stale snapshot, and only one of them may write.
 **Source** https://www.kernel.sh/docs/browsers/profiles/concurrency (untested in lab: executors with profiles)
 
@@ -95,7 +95,7 @@ const browser = await kernel.browsers.create({
 **Source** https://www.kernel.sh/docs/browsers/profiles/concurrency, lab P09
 
 ```ts
-// lab-runs/P09/profile-session.ts (trimmed)
+// untested (writer check; the lab only printed profile_save_changes for its own browser)
 const profile = await kernel.profiles.retrieve(name); // by name or id
 const writers: string[] = [];
 for await (const b of kernel.browsers.list({ status: 'active', query: profile.id })) {
@@ -104,14 +104,14 @@ for await (const b of kernel.browsers.list({ status: 'active', query: profile.id
 if (writers.length > 0) throw new Error(`profile already has a writer: ${writers[0]}`);
 ```
 
-Lab: `query` set to the profile id returned only the browsers on that profile (total 1 with one writer running), so it is precise enough for this check (P09). Lab did not race two concurrent writers: "last one to end wins" was shown with sequential writers only (login writer, then logout writer, then a third browser showed logged-out).
+Lab: `query` set to the profile id returned that browser (total 1 with one writer running). No other active browser was present to be excluded, so the filter's precision was not tested (P09). Lab did not race two concurrent writers: last writer wins was shown with sequential writers only (login writer, then logout writer, then a third browser showed logged-out).
 
 ## Load a profile into a running browser
 
 **If** a browser already exists and you need a profile in it
 **Do** `browsers.update(id, { profile: { name }, start_url })` only on a browser created without a profile, then reconnect: Chromium restarts and CDP clients are disconnected.
 **Avoid** loading into a browser that already has a profile (rejected by the API per the docs), and keeping a stale Playwright connection across the update.
-**Source** https://www.kernel.sh/docs/browsers/profiles/save-and-reuse#load-a-profile-after-browser-creation (untested in lab). CLI: `kernel browsers update --profile-name ... --save-changes` (ref/kernel-cli).
+**Source** https://www.kernel.sh/docs/browsers/profiles/save-and-reuse#load-a-profile-after-browser-creation (untested in lab). CLI: `kernel browsers update --profile-name ... --save-changes` (https://github.com/kernel/kernel-cli).
 
 ## Rename
 
@@ -135,7 +135,7 @@ Lab: `query` set to the profile id returned only the browsers on that profile (t
 **Source** SDK `profiles.download` doc, lab P09
 
 ```ts
-// lab-runs/P09/download-profile.ts (trimmed)
+// lab P09 (trimmed)
 import { writeFileSync } from 'node:fs';
 const res = await kernel.profiles.download(name, { format: 'tar' }); // omit for zstd
 const buf = Buffer.from(await res.arrayBuffer());
@@ -143,11 +143,7 @@ writeFileSync(outFile, buf);
 console.log(`bytes=${buf.length} content-type=${res.headers.get('content-type')}`);
 ```
 
-```bash
-# lab P09: extracts into <dir>
-kernel profiles download <name> --to <dir>          # --format tar.zst (default) | tar
-kernel profiles delete <name> --yes                 # without --yes it fails on a non-TTY and deletes nothing
-```
+CLI (lab P09): `kernel profiles download <name> --to <dir>` extracts into `<dir>` (`--format tar.zst` is the default, or `tar`). `kernel profiles delete <name> --yes` needs `--yes`: without it the command fails on a non-TTY and deletes nothing.
 
 ## "Works on profile A, not on B"
 
@@ -158,14 +154,27 @@ kernel profiles delete <name> --yes                 # without --yes it fails on 
 
 ## Profiles and logins
 
-- Managed Auth writes the login into the profile named by `profile_name`; a new browser on that profile opened logged in (lab P10). Details in `references/logins.md`.
-- Vault fill signs in inside the browser: attach a profile with `save_changes: true` to keep the result. `completed` does not prove the login worked (`references/vaults-payments.md`).
-- Stable profile plus a consistent proxy reduces bot challenges (docs); see `references/unblock.md`.
+**If** the profile holds a login made by Managed Auth
+**Do** pass the same name as `profile_name`; a new browser on that profile opened logged in (lab P10). Details in `references/logins.md`.
+**Avoid** relying on the login before the connection has finished.
+**Source** lab P10, https://www.kernel.sh/docs/browsers/profiles
+
+**If** a vault fills the sign-in inside the browser
+**Do** attach a profile with `save_changes: true` to keep the result.
+**Avoid** treating `completed` as proof the login worked (`references/vaults-payments.md`).
+**Source** `references/vaults-payments.md`
+
+**If** bot challenges keep appearing
+**Do** pair a stable profile with a consistent proxy; see `references/unblock.md`.
+**Avoid** a throwaway profile or a changing proxy for the same account.
+**Source** https://www.kernel.sh/docs/browsers/profiles (section "Reduce bot challenges")
 
 ## Avoid list (old names)
 
 - `persistent: true`, `persistence: { id }`, `--persistent-id`: removed. Use `profile: { name, save_changes: true }` on one browser plus `timeout_seconds`.
 - `browser.close()` or a closed CDP client as "save": it only disconnects.
 - `browser.profile.origins` and similar origin filters: not an API.
+
+Source: `references/does-not-exist.md` (persistent names removed 2026-05-21; `browser.profile.origins` is a docs proposal, not an API).
 
 > Verified in lab: 2026-10-20, @onkernel/sdk 0.127.0, kernel CLI 0.49.0. Probes: P09 confirmed (save_changes writer persists login; CDP close does not save; sequential writers last-wins; false/omitted discards; download is zstd tar by default and tar on request; rename while in use allowed with id unchanged; `browsers.list({ status: 'active', query: profileId })` exposes `profile_save_changes`). P15 confirmed (acquire-time profile with `save_changes` persists), pool-level profile read-only unclear. P10 confirmed (Managed Auth profile opens logged in). NOT tested: concurrent writers racing, save on idle timeout, whether a running browser still saves after a rename, `browsers.update` profile load, `start_url` with a profile, executors-per-tab on one profile, 0-byte download HTTP status, CLI `--profile-name`/`--save-changes` flags on `browsers create` (from CLI source only).

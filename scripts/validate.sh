@@ -45,6 +45,13 @@ check_paths() { # file base-dir-for-relative-refs
   done < <(grep -v 'novalidate' "$f" | grep -oE '(^|[^A-Za-z0-9_./-])(references|scripts)/[A-Za-z0-9._/-]*[A-Za-z0-9_]\.(md|sh|ts|tsv|json|mjs)' | sed -E 's/^[^rs]*//' | sort -u)
 }
 for f in "$P"/skills/*/SKILL.md; do check_paths "$f" "$(dirname "$f")"; done
+# cross-skill pointers: ../kernel/references/x.md (from a SKILL.md) and ../../kernel/references/x.md (from audit/references)
+for f in "$P"/skills/*/SKILL.md "$P"/skills/*/references/*.md; do
+  d="$(dirname "$f")"
+  while IFS= read -r p; do
+    [ -e "$d/$p" ] || bad "$f names missing path: $p"
+  done < <(grep -v 'novalidate' "$f" | grep -oE '(\.\./)+kernel/references/[A-Za-z0-9._-]+\.md' | sort -u)
+done
 for f in "$P"/skills/*/references/*.md; do check_paths "$f" "$(dirname "$(dirname "$f")")"; done
 for f in "$P/hooks/hooks.json" "$P"/skills/*/SKILL.md "$P"/skills/*/references/*.md README.md "$P/README.md"; do
   [ -f "$f" ] || continue
