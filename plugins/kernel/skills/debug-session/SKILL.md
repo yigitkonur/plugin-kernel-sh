@@ -4,6 +4,7 @@ description: >-
   Debug a failed, hung, blocked or timed-out Kernel browser session from its session id or name: read session state and telemetry events (they stay readable after the browser is deleted), check live page state, replays and logs, then diagnose and propose a fix. Use when a Kernel run fails or misbehaves, or the user gives a Kernel session id.
 argument-hint: "<session-id-or-name>"
 ---
+<!-- Derived in part from the official Kernel skill `debug-browser-session` (https://github.com/kernel/skills, MIT, Copyright (c) 2025 Kernel). License text: THIRD_PARTY_NOTICES.md at the plugin root. -->
 
 # Debug a Kernel browser session
 
@@ -77,15 +78,10 @@ The JSON is `{ "events": [ { "seq": N, "event": { "ts", "type", "category", "sou
 Then pull only the failure signals, one line each, with URLs stripped of query strings. Failures sit at the end, so take the last 40:
 
 ```bash
-jq -r '.events[]
-  | select(.event.type=="console_error"
-      or (.event.type=="network_loading_failed" and .event.data.target_type=="page")
-      or (.event.type=="network_response" and .event.data.status>=400)
-      or (.event.type|IN("page_crashed","system_oom_kill","service_crashed","proxy_error","monitor_disconnected","monitor_reconnected","cdp_disconnect")))
-  | [.seq,(.event.ts/1000000|floor|todate),.event.type,
-     (.event.data.status//.event.data.error_text//(.event.data.text//""|.[0:120])),
-     ((.event.data.url//"")|sub("\\?.*";"?***"))] | @tsv' <D>/events.json | tail -40
+jq -r -f "${CLAUDE_SKILL_DIR}/scripts/events.jq" <D>/events.json | tail -40
 ```
+
+(`${CLAUDE_SKILL_DIR}` is this skill's folder; if it is empty the file is `<plugin>/skills/debug-session/scripts/events.jq`.) The filter keeps `console_error`, page-level `network_loading_failed`, HTTP 4xx/5xx `network_response` and the crash and disconnect types, and redacts bearer values, secret-looking `key=value` pairs, URL userinfo, query strings, fragments and long opaque path segments. That is best effort: console text can still hold something sensitive, so quote a row in your answer only after reading it, and never paste whole event objects.
 
 Do not print `.event.data` whole. The CLI also filters server-side: `--types console_error,network_loading_failed` and `--categories console` both work; `--limit`/`--offset` page manually if `--all` is too much.
 

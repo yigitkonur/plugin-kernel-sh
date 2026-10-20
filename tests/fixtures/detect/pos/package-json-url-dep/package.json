@@ -1,0 +1,6 @@
+{
+  "name": "app",
+  "dependencies": {
+    "@onkernel/sdk": "https://alice:SYNTHETICPASSWORD@example.com/pkg/sdk.tgz"
+  }
+}

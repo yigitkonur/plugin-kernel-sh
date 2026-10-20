@@ -5,6 +5,7 @@ description: >-
 argument-hint: "<profile-a> <profile-b> [issue]"
 disable-model-invocation: true
 ---
+<!-- Derived in part from the official Kernel skill `diff-profile-archives` (https://github.com/kernel/skills, MIT, Copyright (c) 2025 Kernel). License text: THIRD_PARTY_NOTICES.md at the plugin root. -->
 
 # Diff two Kernel profiles
 

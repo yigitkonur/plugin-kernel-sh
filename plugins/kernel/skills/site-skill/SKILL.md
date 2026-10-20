@@ -5,6 +5,7 @@ description: >-
 argument-hint: "[domain]"
 disable-model-invocation: true
 ---
+<!-- Derived in part from the official Kernel skill `create-agent-site-skill` (https://github.com/kernel/skills, MIT, Copyright (c) 2025 Kernel). License text: THIRD_PARTY_NOTICES.md at the plugin root. -->
 
 # Turn a working Kernel workflow into a site skill
 

@@ -49,9 +49,12 @@ kp_classify() {
         if (ex[i] != "" && text ~ ex[i]) continue
         match(text, re[i]); m = substr(text, RSTART, RLENGTH)
         if (m ~ /kernel[[:space:]]/ && m !~ /^kernel/) sub(/^[^k]*/, "", m)
-        sub(/^[^A-Za-z@"]+/, "", m); sub(/[[:space:]]+$/, "", m); if (length(m) > 60) m = substr(m, 1, 60)
+        sub(/^[^A-Za-z@"]+/, "", m); sub(/[[:space:]]+$/, "", m); gsub(/\/\/[^\/ @]*@/, "//***@", m); if (length(m) > 60) m = substr(m, 1, 60)
         if (file ~ /(^|\/)package\.json$/ && match(text, /"@onkernel\/[a-z-]+"[[:space:]]*:[[:space:]]*"[^"]*"/)) {
-          v = substr(text, RSTART, RLENGTH); sub(/^[^:]*:[[:space:]]*"/, "", v); sub(/"$/, "", v); sub(/^"/, "", m); sub(/"$/, "", m); m = m " " v
+          v = substr(text, RSTART, RLENGTH); sub(/^[^:]*:[[:space:]]*"/, "", v); sub(/"$/, "", v); sub(/^"/, "", m); sub(/"$/, "", m)
+          # keep only a plain version range or tag; a URL, git or file spec can carry credentials and never reaches the evidence
+          if (v !~ /^[A-Za-z0-9.^~<>=*| +-]+$/ || length(v) > 30) v = "(custom spec)"
+          m = m " " v
         }
         rec = tier[i] "\t" grp[i] "\t" file "\t" ln "\t" m
         if (tier[i] == 1) { print "T1\t" grp[i] "\t" file "\t" ln "\t" m; done = 1; exit }

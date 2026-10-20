@@ -4,6 +4,7 @@ description: >-
   Get an agent a logged-in Kernel browser for a website, after confirming the user wants browser auth: first decide whether browser auth is needed at all (API or MCP first), then choose Managed Auth (hosted login saved to a profile) or a vault fill, and relaunch a logged-in browser. Use when code or a task needs an authenticated session on a site: log in, reuse a login, credentials, SSO or MFA.
 argument-hint: "<domain>"
 ---
+<!-- Derived in part from the official Kernel skill `kernel-auth` (https://github.com/kernel/skills, MIT, Copyright (c) 2025 Kernel). License text: THIRD_PARTY_NOTICES.md at the plugin root. -->
 
 # /kernel:login
 

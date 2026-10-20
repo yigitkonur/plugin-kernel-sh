@@ -5,6 +5,7 @@ description: >-
 argument-hint: "<url>"
 disable-model-invocation: true
 ---
+<!-- Derived in part from the official Kernel skill `profile-website-bot-detection` (https://github.com/kernel/skills, MIT, Copyright (c) 2025 Kernel). License text: THIRD_PARTY_NOTICES.md at the plugin root. -->
 
 # Profile a site's bot detection with Kernel
 

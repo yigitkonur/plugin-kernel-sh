@@ -197,13 +197,15 @@ const N = 3; // must be <= concurrent_sessions_available
 const items = ['https://example.com', 'https://example.org'];
 
 async function one(url: string) {
-  const browser = await kernel.browsers.create(
-    { headless: true, timeout_seconds: 120, tags: { run: process.env.RUN_ID ?? 'local' } },
-    { maxRetries: 0, timeout: 30_000 },
-  );
+  let id: string | undefined; // set once the browser exists, so finally can delete it
   try {
+    const browser = await kernel.browsers.create( // a 429, 403 or timeout here is a per-item failure too
+      { headless: true, timeout_seconds: 120, tags: { run: process.env.RUN_ID ?? 'local' } },
+      { maxRetries: 0, timeout: 30_000 },
+    );
+    id = browser.session_id;
     const res = await kernel.browsers.playwright.execute(
-      browser.session_id,
+      id,
       { code: `await page.goto(${JSON.stringify(url)}); return await page.title();`, timeout_sec: 30 },
       { maxRetries: 0, timeout: 40_000 },
     );
@@ -211,7 +213,7 @@ async function one(url: string) {
   } catch (e) {
     return { url, ok: false, result: String(e) }; // per-item catch: others keep going
   } finally {
-    await kernel.browsers.deleteByID(browser.session_id).catch(() => {}); // 404 = already reaped
+    if (id) await kernel.browsers.deleteByID(id).catch(() => {}); // 404 = already reaped; a create that timed out client-side is found by the run tag
   }
 }
 

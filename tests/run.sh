@@ -97,6 +97,17 @@ t_contains "detect negative result is cached too" "$("$KP_SH" "$P/bin/kernel-plu
 t_contains "detect tier-2 pair is tier 2" "$("$KP_SH" "$P/bin/kernel-plugin" detect --json "$W/det/nogit/pos-tier2-pair")" '"tier":2'
 t_contains "detect text mode" "$("$KP_SH" "$P/bin/kernel-plugin" detect "$D")" 'kernel detected'
 t_contains "detect text mode (negative)" "$("$KP_SH" "$P/bin/kernel-plugin" detect "$W/det/nogit/neg-plain-ts")" 'no kernel markers'
+# a dependency spec with credentials in it (tarball / git URL) must never reach the evidence, the cache or the primer
+LEAKOUT="$("$KP_SH" "$P/bin/kernel-plugin" detect --json "$W/det/nogit/pos-package-json-url-dep" 2>&1)"
+t_contains "detect still detects a URL dependency" "$LEAKOUT" '"detected":true'
+case "$LEAKOUT$(cat "$CLAUDE_PLUGIN_DATA"/state/detect-* 2>/dev/null)" in *SYNTHETICPASSWORD*|*alice*) bad "detect leaks dependency credentials" "$(printf '%s' "$LEAKOUT" | cut -c1-200)" ;; *) ok "detect never echoes credentials from a dependency URL (output and cache)" ;; esac
+# debug-session's events projection redacts secrets from console text and URLs
+if [ "$KP_HAVE_JQ" = 1 ]; then
+  EVOUT="$(jq -r -f "$P/skills/debug-session/scripts/events.jq" "$F/debug/events-secrets.json" 2>&1)"
+  case "$EVOUT" in *SYNTHETIC*|*alice*) bad "events.jq redacts secrets" "$(printf '%s' "$EVOUT" | cut -c1-200)" ;; *) ok "events.jq redacts bearer, key=value, userinfo, query, fragment" ;; esac
+  t_contains "events.jq keeps the diagnostic columns" "$EVOUT" 'network_response	500'
+  t_contains "events.jq keeps a page-level failed navigation" "$EVOUT" 'net::ERR_ABORTED'
+fi
 # a relative path ('.') in two different non-git directories must not share a cache entry
 t_contains "detect '.' in a non-git positive dir" "$(cd "$W/det/nogit/pos-package-json" && "$KP_SH" "$P/bin/kernel-plugin" detect --json .)" '"detected":true'
 t_contains "detect '.' in a non-git negative dir is not served the positive's cache" "$(cd "$W/det/nogit/neg-plain-ts" && "$KP_SH" "$P/bin/kernel-plugin" detect --json .)" '"detected":false'

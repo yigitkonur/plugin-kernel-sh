@@ -66,5 +66,9 @@ V="$(tr -d '[:space:]' < VERSION)"
 [ "$(jq -r '.metadata.version' .claude-plugin/marketplace.json)" = "$V" ] || bad "marketplace metadata.version != VERSION ($V)"
 [ "$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)" = "$V" ] || bad "marketplace plugin entry version != VERSION ($V)"
 
+# 7 the license notice ships inside the plugin and the repo-root copy matches it
+[ -f "$P/THIRD_PARTY_NOTICES.md" ] || bad "missing $P/THIRD_PARTY_NOTICES.md (the installed plugin must carry the upstream MIT notice)"
+cmp -s THIRD_PARTY_NOTICES.md "$P/THIRD_PARTY_NOTICES.md" || bad "THIRD_PARTY_NOTICES.md differs between the repo root and $P"
+
 [ $fail = 0 ] && echo "validate: OK"
 exit $fail
