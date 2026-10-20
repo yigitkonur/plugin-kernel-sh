@@ -36,7 +36,9 @@ const kb = await kernel.browsers.create({ timeout_seconds: 60, tags: { run: runI
 try {
   // ... work ...
 } finally {
-  await kernel.browsers.deleteByID(kb.session_id);
+  await kernel.browsers.deleteByID(kb.session_id).catch((e) => {
+    if (!(e instanceof Kernel.NotFoundError)) throw e; // 404: the timeout already reaped it
+  });
 }
 ```
 
@@ -120,7 +122,7 @@ await release(lease.session_id, false);
 
 ## C16. No deliberate timeout or run tag
 
-**If** `browsers.create` has no `timeout_seconds`, a very long one (the sample app uses 3600), or no `tags`. **Look for** a browser created at module load or kept in a module-level variable "to save time". **Fix** create per task, set `timeout_seconds` on purpose, tag with a run id so leaks are findable (`kernel browsers list --tag run=<id>`). The timeout counts from idle (the browser must have no client): verified live, a `timeout_seconds: 10` browser was reaped between 5 and 17 s after create across three runs, and a 120 s browser stayed active for at least 30 s after the client left. **Avoid** a long timeout as a substitute for deleting (C01). Create takes about 330 ms client-side (measured, n=5), so caching a browser for speed buys nothing. **Source** https://www.kernel.sh/docs/browsers/standby.
+**If** `browsers.create` has no `timeout_seconds`, a very long one (the sample app uses 3600), or no `tags`. **Look for** a browser created at module load or kept in a module-level variable "to save time". **Fix** create per task, set `timeout_seconds` on purpose, tag with a run id so leaks are findable (`kernel browsers list --tag run=<id>`). The timeout counts from idle (the browser must have no client): verified live, a `timeout_seconds: 10` browser was reaped between 8 and 17 s after create (ledger P02.5), and a 120 s browser stayed active for at least 30 s after the client left. **Avoid** a long timeout as a substitute for deleting (C01). Create takes about 330 ms client-side (measured, n=5), so caching a browser for speed buys nothing. **Source** https://www.kernel.sh/docs/browsers/standby.
 
 ## C17. Pool `acquire` result not null-checked
 

@@ -193,7 +193,7 @@ Billing: only the time your code executes, per second; failed and cancelled runs
 
 ## S14. CI and cleanup
 
-**If** CI deploys the App -> **Do** `kernel deploy index.ts --version "$(git rev-parse --short HEAD)" -o json`, and invoke that exact version. **Avoid** re-deploying a label that already exists without `--force` (docs: duplicate labels need `--force`; (unverified): the error text was not captured). The `$(git rev-parse ...)` form was not run (`# untested`; only `--version v1` and `v2` were deployed). Use `-y` on destructive commands.
+**If** CI deploys the App -> **Do** `kernel deploy index.ts --version "$(git rev-parse --short HEAD)" -o json`, and invoke that exact version. **Avoid** re-deploying a label that already exists without `--force` (docs: duplicate labels need `--force`; (unverified): the error text was not captured). The `$(git rev-parse ...)` form was not run (`# untested`; only `--version v1` and `v2` were deployed). `kernel app delete` takes `-y`; `kernel browsers delete` has no `-y` and never prompts; `kernel profiles delete` needs `--yes` (ledger P20.8).
 
 **If** you made a throwaway App in a test -> **Do** remove it and prove it is gone:
 

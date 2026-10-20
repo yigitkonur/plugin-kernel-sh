@@ -2,6 +2,7 @@ name: ci
 on:
   push: { branches: [main] }
   pull_request:
+permissions: { contents: read }
 jobs:
   test:
     strategy:
@@ -9,9 +10,9 @@ jobs:
       matrix: { os: [ubuntu-latest, macos-latest] }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with: { fetch-depth: 0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22 }
       - name: Tools
         run: |
@@ -22,11 +23,27 @@ jobs:
         env:
           # p95 budget per hook call: 50 ms on a laptop and Linux runners; the shared macOS runner spawns processes ~5x slower
           KP_BENCH_MS: ${{ matrix.os == 'macos-latest' && '400' || '50' }}
+      - name: Tests under sh, dash and GNU coreutils
+        if: matrix.os == 'ubuntu-latest'
+        run: sh tests/run.sh --all-shells
       - name: Install Claude Code CLI (for plugin validate)
         run: npm i -g @anthropic-ai/claude-code
       - name: Validate plugin and marketplace
         run: scripts/validate.sh
+      - name: Type-check the TypeScript snippets in the skills
+        run: |
+          cd lab
+          npm install --no-audit --no-fund
+          node ../scripts/typecheck-snippets.mjs
       - name: Secret scan (tree and history)
         run: |
           scripts/secret-scan.sh --tree
           scripts/secret-scan.sh --history
+      - name: Tests without jq
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get remove -y jq
+          ! command -v jq
+          sh tests/run.sh
+        env:
+          KP_BENCH_MS: 150   # the sed fallback is slower than jq; this run checks behavior, not speed

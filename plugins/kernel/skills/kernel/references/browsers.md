@@ -45,7 +45,7 @@ try {
 **If** you create a browser -> **Do** pass `timeout_seconds` on purpose (default 60 and max 72 h = 259200 per docs; minimum 10 per the SDK type) and still delete it yourself in `finally`. The timeout is a backstop that counts from standby, not a lease from create. -> **Avoid** using `timeout_seconds` to free a slot (delete instead); fearing idle cost (standby is free but still holds a concurrency slot). -> **Source** https://www.kernel.sh/docs/browsers/termination, https://www.kernel.sh/docs/browsers/standby
 
 - Active means: a CDP or WebDriver client is connected, a live view viewer is open, or a computer-controls request is in flight. After about 5 s with none of those the browser enters standby and the timeout clock starts.
-- Verified live: with `timeout_seconds: 10` and no client, three runs were gone between 5 and 17 s after create. With `timeout_seconds: 120` and no client, the browser was still listed active at 30 s.
+- Verified live: with `timeout_seconds: 10` and no client, the browser was gone between 8 and 17 s after create (ledger P02.5). With `timeout_seconds: 120` and no client, the browser was still listed active at 30 s.
 - No status, standby or usage field appeared in live retrieve/list responses, although the SDK types declare `usage` and `usage_status`. Do not branch on them; use list membership and `deleted_at`. The active list can lag by a few seconds (one run showed the browser missing at t=9 s, unexplained), so confirm with `retrieve` before acting.
 - GPU browsers never enter standby (B8).
 

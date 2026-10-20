@@ -7,6 +7,8 @@ BEGIN {
 {
   for (r = 1; r <= n; r++) if ($0 ~ re[r]) {
     t = $0; gsub(/\t/, " ", t); sub(/^[[:space:]]+/, "", t); if (length(t) > 120) t = substr(t, 1, 120)
+    gsub(/sk_[0-9a-fA-F]+(-[0-9a-fA-F]+)+\.[A-Za-z0-9_-]+/, "sk_***", t)   # no rule echoes a key that shares the line
+    if (id[r] == "K019") t = "[key literal masked]"
     print FILENAME "\t" FNR "\t" id[r] "\t" sev[r] "\t" t "\t" msg[r] "\t" rep[r] "\t" url[r]
   }
 }

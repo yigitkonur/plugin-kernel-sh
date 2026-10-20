@@ -2,7 +2,7 @@
 # check-freshness.sh [--issue] -- compare what this plugin was verified against with what is current.
 #  1 latest @onkernel/sdk and @onkernel/cli vs references/verified-against.md
 #  2 @deprecated tags in the latest SDK types that were not in the verified SDK (candidate K0xx rules)
-#  3 changelog entries newer than the verified date
+#  3 the newest docs changelog entry vs the one recorded in verified-against.md
 # With --issue, opens a GitHub issue (needs gh auth) when anything changed and no open "freshness" issue exists.
 set -u
 cd "$(git rev-parse --show-toplevel)"
@@ -24,7 +24,12 @@ if [ -n "${vsdk:-}" ] && [ -n "${lsdk:-}" ] && [ "$lsdk" != "$vsdk" ]; then
   { echo; echo "## New @deprecated tags between $vsdk and $lsdk (candidate stale-API rules)"; diff <(grab "$w/a") <(grab "$w/b") | grep '^>' | head -40; } >> "$report"
   rm -rf "$w"
 fi
-{ echo; echo "## Docs changelog (top of page)"; curl -s -m 30 https://www.kernel.sh/docs/changelog.md 2>/dev/null | head -15; } >> "$report"
+vtop="$(sed -n 's/^| Docs changelog, newest entry | \(.*\) |$/\1/p' "$VA" | head -1)"
+cl="$(curl -s -m 30 https://www.kernel.sh/docs/changelog.md 2>/dev/null)"
+ltop="$(printf '%s\n' "$cl" | grep -m1 -E '^\*\*[A-Z][a-z]+ [0-9]+\*\*' | tr -d '*')"
+echo "- docs changelog newest entry: recorded '${vtop:-?}', now '${ltop:-?}'" >> "$report"
+[ -n "$ltop" ] && [ "$ltop" != "$vtop" ] && changed=1
+{ echo; echo "## Docs changelog (top of page)"; printf '%s\n' "$cl" | head -15; } >> "$report"
 cat "$report"
 if [ "${1:-}" = "--issue" ] && [ $changed = 1 ]; then
   if gh issue list --label freshness --state open --json number --jq 'length' 2>/dev/null | grep -qx 0; then

@@ -8,10 +8,18 @@
 // Do not use an inline `SITE_PASSWORD=... node ...` prefix: it lands in shell history and the tool transcript.
 // Environment: KERNEL_API_KEY (required; export it or use node --env-file=<file>), SITE_USER and SITE_PASSWORD
 // (required), SITE_TOTP_SECRET (optional, base32 or an otpauth:// URI), KERNEL_PROJECT (optional project id or
-// exact name). Prints only id, name, domain and has_totp_secret. Needs Node 20.6+ for --env-file (18+ with exported
+// exact name), KERNEL_BASE_URL (optional, like the SDK; default https://api.onkernel.com). Prints only id, name, domain and has_totp_secret. Needs Node 20.6+ for --env-file (18+ with exported
 // variables; global fetch); no dependencies.
 const [name, domain] = process.argv.slice(2);
-const { KERNEL_API_KEY, SITE_USER, SITE_PASSWORD, SITE_TOTP_SECRET, KERNEL_PROJECT } = process.env;
+const { KERNEL_API_KEY, SITE_USER, SITE_PASSWORD, SITE_TOTP_SECRET, KERNEL_PROJECT, KERNEL_BASE_URL } = process.env;
+const base = (KERNEL_BASE_URL || 'https://api.onkernel.com').replace(/\/+$/, '');
+let baseUrl;
+try { baseUrl = new URL(base); } catch { baseUrl = null; }
+// the key and the password travel in this request: never over cleartext (http is accepted for localhost only, for tests)
+if (!baseUrl || !(baseUrl.protocol === 'https:' || (baseUrl.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(baseUrl.hostname)))) {
+  console.error('create-credential: KERNEL_BASE_URL must be an https URL');
+  process.exit(2);
+}
 
 const missing = [];
 if (!name || !domain) missing.push('arguments <credential-name> <domain>');
@@ -32,7 +40,7 @@ if (KERNEL_PROJECT) headers['X-Kernel-Project'] = KERNEL_PROJECT;
 
 let res;
 try {
-  res = await fetch('https://api.onkernel.com/credentials', { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
+  res = await fetch(`${base}/credentials`, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
 } catch (e) {
   console.error(`create-credential: request failed: ${e.name}`);
   process.exit(1);

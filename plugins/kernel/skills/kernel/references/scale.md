@@ -280,7 +280,7 @@ try {
 
 **Source** https://www.kernel.sh/docs/browsers/concurrency-and-limits.
 
-## C8. Before cost-bearing work, and on a 403
+## S7b. Before cost-bearing work, and on a 403
 
 **If** you start cost-bearing work (many browsers, GPU, a pool), or get a 403 -> **Do**:
 
@@ -292,7 +292,7 @@ kernel org entitlements -o json | jq '{plan: .plan.id, gpu: .features.gpu.enable
 
 Then read the 403 body: it can be a plan gate, an exhausted spending cap, `insufficient_scope`, or a project mismatch. At 100% of a spending cap new browser sessions and app invocations return 403 for that scope while running work continues; a pool can hold idle capacity but you cannot acquire from a capped scope (https://www.kernel.sh/docs/info/spending-caps). -> **Avoid** inferring access from plan names or from one docs page.
 
-- On a Hobbyist account `gpu`, `custom_proxies`, `search`, `proxy_bypass_hosts` were all false. A `gpu: true` create with `headless: true` fails 400 `invalid_request` ("headless mode is not supported with gpu=true") before any plan check, creates nothing, and so does not tell you whether GPU is plan-gated. The plan-gate error for GPU (headful) was not observed. GPU is on-demand only; it cannot come from a pool.
+- On a Hobbyist account `gpu`, `custom_proxies`, `search`, `proxy_bypass_hosts` were all false. A `gpu: true` create with `headless: true` fails 400 `invalid_request` ("headless mode is not supported with gpu=true") before any plan check. The headful GPU create returned 403 `insufficient_plan` ("GPU acceleration requires an active paid Start-Up or Enterprise plan"; ledger P16.8, `references/browsers.md` B8) and created nothing. GPU is on-demand only; it cannot come from a pool.
 
 **Source** https://www.kernel.sh/docs/info/spending-caps, https://www.kernel.sh/docs/browsers/concurrency-and-limits, https://www.kernel.sh/docs/info/api-keys (`insufficient_scope`), https://www.kernel.sh/docs/info/projects (project mismatch).
 

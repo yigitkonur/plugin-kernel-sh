@@ -83,7 +83,7 @@ kp_scan_all() {
 }
 
 kp_detect() {
-  KP_DET=0; KP_DET_TIER=0; KP_DET_SUMMARY=""; KP_DET_EVIDENCE=""; KP_DET_ROOT=""; KP_DET_CACHED=0
+  KP_DET=0; KP_DET_TIER=0; KP_DET_SUMMARY=""; KP_DET_EVIDENCE=""; KP_DET_ROOT=""; KP_DET_CACHED=0; KP_DET_UNKNOWN=0
   _kp_dir="${1:-.}"
   [ -d "$_kp_dir" ] || return 0
   _kp_dir="$(cd "$_kp_dir" 2>/dev/null && pwd -P)" || return 0   # absolute: the cache key comes from it
@@ -118,11 +118,24 @@ kp_detect() {
   # 2-3. manifests and config files, 4. everything else; both feed the same classifier
   _kp_ua="$(kp_marker_union all)"
   [ -n "$_kp_ua" ] || return 0
+  # a scan that started and never finished (killed at the hook timeout) leaves a marker: do not repeat it for 10 minutes,
+  # and tell the caller the answer is unknown so it is not stored as "not a Kernel project"
+  if [ -f "$_kp_cache.scan" ] && [ -n "$(find "$_kp_cache.scan" -mmin -10 2>/dev/null)" ]; then KP_DET_UNKNOWN=1; return 0; fi
   _kp_tmp="$(mktemp "${TMPDIR:-/tmp}/kp-det.XXXXXX")" || return 0
+  printf "" > "$_kp_cache.scan" 2>/dev/null
   ( cd "$KP_DET_ROOT" && kp_cfg_files . -exec grep -I -n -E -e "$_kp_ua" /dev/null {} + 2>/dev/null ) | kp_classify "" > "$_kp_tmp"
   if ! grep -q '^T1' "$_kp_tmp"; then
-    kp_scan_all "$KP_DET_ROOT" | kp_classify "$_kp_tmp" > "$_kp_tmp.2"
-    mv "$_kp_tmp.2" "$_kp_tmp"
+    # a non-git folder is walked with grep -r: past KP_SCAN_MAX_FILES files (default 5000) only manifests and config files count
+    _kp_walk=1
+    if [ "$_kp_head" = nogit ]; then
+      _kp_max="${KP_SCAN_MAX_FILES:-5000}"
+      _kp_cnt="$( cd "$KP_DET_ROOT" && find . \( -name node_modules -o -name .git -o -name vendor -o -name dist -o -name target -o -name .venv \) -prune -o -type f -print 2>/dev/null | head -n "$((_kp_max + 1))" | wc -l | tr -d ' ')"
+      [ "${_kp_cnt:-0}" -le "$_kp_max" ] || _kp_walk=0
+    fi
+    if [ "$_kp_walk" = 1 ]; then
+      kp_scan_all "$KP_DET_ROOT" | kp_classify "$_kp_tmp" > "$_kp_tmp.2"
+      mv "$_kp_tmp.2" "$_kp_tmp"
+    fi
   fi
   if grep -q '^T1' "$_kp_tmp"; then
     KP_DET=1; KP_DET_TIER=1; KP_DET_EVIDENCE="$(sed -n 1p "$_kp_tmp")"
@@ -138,5 +151,6 @@ kp_detect() {
   { printf '%s\n%s\n%s\n%s\n' "$_kp_head" "$KP_DET" "$KP_DET_TIER" "$KP_DET_SUMMARY"
     if [ -n "$KP_DET_EVIDENCE" ]; then printf '%s\n' "$KP_DET_EVIDENCE"; fi; } > "$_kp_cache.$$" 2>/dev/null
   mv "$_kp_cache.$$" "$_kp_cache" 2>/dev/null || rm -f "$_kp_cache.$$" 2>/dev/null
+  rm -f "$_kp_cache.scan" 2>/dev/null
   return 0
 }

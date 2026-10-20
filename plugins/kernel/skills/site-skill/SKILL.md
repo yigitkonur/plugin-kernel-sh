@@ -24,7 +24,7 @@ Rules for the whole run:
 
 ## 1. Check the CLI
 
-Run `command -v kernel` and `command -v jq`. If either prints nothing, say what is missing, print `brew install kernel/tap/kernel` (or `npm i -g @onkernel/cli`) and stop; install nothing. Run `kernel auth context -o json >/dev/null`; if it exits non-zero, tell the user to set `KERNEL_API_KEY` and stop.
+Run `command -v kernel` and `command -v jq`. If either prints nothing, say what is missing, print `brew install kernel/tap/kernel` (or `npm i -g @onkernel/cli`) and stop; install nothing. Run `kernel auth context -o json >/dev/null`; if it exits non-zero, tell the user to set `KERNEL_API_KEY` and stop. (The CLI writes errors to stderr and nothing to stdout, so never pipe a `kernel` command straight into `jq`: a failure would look like empty success. Capture first: `out=$(kernel ... -o json) && jq '...' <<<"$out" || echo "could not run: <what>"`.)
 
 ## 2. Find what already worked
 
@@ -34,7 +34,7 @@ Decide the controls. Default is the CLI: `kernel browsers playwright execute` fo
 
 ## 3. Get consent, then prepare a discovery browser
 
-Name profiles and vaults `<site>-<user-id>`; resolve the user id from the message or project, ask if unknown. Skip this (and the profile and vault) when the flow needs neither, for example a public practice site with no login. Check what exists first: `kernel profiles list -o json | jq -r '.[].name'` (unverified jq path; read the raw keys first with `jq '.[0]|keys'`).
+Name profiles and vaults `<site>-<user-id>`; resolve the user id from the message or project, ask if unknown. Skip this (and the profile and vault) when the flow needs neither, for example a public practice site with no login. Check what exists first with the exact-name filter (the list returns 20 per page, so an unfiltered list can miss a profile): `out=$(kernel profiles list --name "<site>-<user-id>" -o json) && jq -r '.[].name' <<<"$out" || echo "could not check: profiles list"` (the `.name` path is unverified; if it prints nothing but the output is not `[]`, read the keys with `jq '.[0]|keys'`). On `could not check`, stop and tell the user: do not treat it as "absent".
 
 Then list for the user every profile, vault, credential item and browser you will create or write to, marking which already exist. WAIT for a yes before creating anything. In a non-interactive run the user's explicit request to build and run is the consent for tagged browsers only; anything that creates a profile, vault or credential still needs a yes. Never use `--save-changes` on a profile that existed before this run.
 
@@ -45,14 +45,14 @@ kernel profiles create --name "<site>-<user-id>"
 kernel vaults create --name "<site>-<user-id>"   # only if the site needs a login
 ```
 
-Pick one unique run tag now, for example `site-skill-<site>-<6 random letters or digits>`, and write its literal value in every browser command of this run (steps 3, 7 and 8). Create the browser. Headful is the default and live view needs it (headless returns no `browser_live_view_url`). Prefer headful for computer calls. `--stealth` and `--vault` can only be set at creation. The CLI default `--timeout` is 60 seconds; use more for discovery:
+Pick one unique run tag now, for example `site-skill-<site>-<6 random letters or digits>`, and write its literal value in every browser command of this run (steps 3, 7 and 8). Make one private scratch directory for screenshots (`umask 077; mktemp -d`), print it, and use that literal path as `<S>` wherever a screenshot is saved (a fixed path in the shared temp folder can collide or be a symlink). Create the browser. Headful is the default and live view needs it (headless returns no `browser_live_view_url`). Prefer headful for computer calls. `--stealth` and `--vault` can only be set at creation. The CLI default `--timeout` is 60 seconds; use more for discovery:
 
 ```bash
-kernel browsers create --profile-name "<site>-<user-id>" --tag "run=<run-tag>" --save-changes --stealth \
-  --vault "<site>-<user-id>" --timeout 600 -o json | jq -r '.session_id'
+out=$(kernel browsers create --profile-name "<site>-<user-id>" --tag "run=<run-tag>" --stealth \
+  --vault "<site>-<user-id>" --timeout 600 -o json) && jq -r '.session_id' <<<"$out" || echo "could not run: browsers create"
 ```
 
-Add `--save-changes` only if you created that profile in this run (step 3 `profiles create`); for a profile that existed before, drop the flag so deleting the browser cannot overwrite it. Print the id once; if it is empty, stop. Use that literal id wherever this file says `<browser-id>`. Omit `--vault` for sites with no login. The combined command is unverified; `--save-changes` needs a profile. Profile facts: changes are saved only when a session created with `--save-changes` is deleted (closing the CDP client saves nothing); without the flag they are discarded; with two writers the last wins, so run one writer per profile.
+Add `--save-changes` only if you created that profile in this run (step 3 `profiles create`); for a profile that existed before, leave the flag out so deleting the browser cannot overwrite it. Print the id once; if it is empty or the command printed `could not run`, stop. Use that literal id wherever this file says `<browser-id>`. Omit `--vault` for sites with no login. The combined command is unverified; `--save-changes` needs a profile. Profile facts: changes are saved only when a session created with `--save-changes` is deleted (closing the CDP client saves nothing); without the flag they are discarded; with two writers the last wins, so run one writer per profile.
 
 ## 4. Establish login (only if the site needs it)
 
@@ -60,7 +60,7 @@ Check first whether the saved profile is already logged in (the `goto` plus `pag
 
 ```bash
 kernel browsers playwright execute <browser-id> -o json 'await page.goto("<site-url>"); return page.url()'
-kernel browsers computer screenshot <browser-id> --to /tmp/state.png
+kernel browsers computer screenshot <browser-id> --to <S>/state.png
 ```
 
 Read the PNG to judge the state. If login is needed, use the vault. Exception: a throwaway or demo account whose credentials must reach a script and no vault is wanted. Follow the secrets policy in `../kernel/SKILL.md`: a password never goes in project code or on a command line, so use the SDK's `playwright.execute` (the CLI form puts the code on a command line), read the secret from the environment at run time and put it into the `code` string with `JSON.stringify` (it travels in the request body); never log that string, never commit it, never write values into the generated skill. A password pasted in chat is already in the transcript: keep it out of files, shell history and later commands. Inspect the login form and note field names, types and sensitivity. Create the credential item without values (unverified CLI path; `fields` is an ordered array with `name`):
@@ -76,10 +76,10 @@ JSON
 Give the returned collection URL to the user in ONE message to open in their own browser, never in the Kernel browser. Check readiness; repeat only while the status is pending:
 
 ```bash
-kernel vaults items get "<site>-<user-id>" "<site>-login" --wait 60 -o json | jq '.state.status'
+out=$(kernel vaults items get "<site>-<user-id>" "<site>-login" --wait 60 -o json) && jq '.state.status' <<<"$out" || echo "could not run: vaults items get"
 ```
 
-(`--wait` takes 0-60 seconds and only observes; the CLI JSON path is unverified, check the raw JSON once.) When the item is ready, fill by field name and selector, then submit yourself (`fill` never submits):
+(`--wait` takes 0-60 seconds and only observes; the CLI JSON path is unverified, check the keys once with `jq 'keys' <<<"$out"`.) When the item is ready, fill by field name and selector, then submit yourself (`fill` never submits):
 
 ```bash
 kernel vaults items invoke "<site>-<user-id>" "<site>-login" fill --spec-file - <<'JSON'
@@ -104,7 +104,7 @@ DOM rules (use `return` for results; globals persist across calls on the same na
 Computer fallback: if Playwright fails 2-3 times on a step (error, timeout, or no page change), use OS-level controls for that step only, after checking the step did not already succeed:
 
 ```bash
-kernel browsers computer screenshot <browser-id> --to /tmp/state.png
+kernel browsers computer screenshot <browser-id> --to <S>/state.png
 kernel browsers computer click-mouse <browser-id> --x 250 --y 60
 kernel browsers computer type <browser-id> --text "some text"
 kernel browsers computer press-key <browser-id> --key Return
@@ -140,7 +140,7 @@ description: <What it does on <site> and when to use it.>
 <Expected outcome and recovery. Repeat per task.>
 
 ## Cleanup
-<Close any attached harness, delete the browser, rm -f the state png.>
+<Close any attached harness, delete the browser, remove the scratch screenshots.>
 
 ## Notes
 <Quirks, workarounds, coordinates and viewport size.>
@@ -151,6 +151,7 @@ Include the credential field schema (names, types, sensitive flags), field-to-se
 Leak check before the file is final. Run this on the draft and fix every hit:
 
 ```bash
+grep -c -E 'sk_[0-9a-fA-F]{8}-' <file>   # a count only: a key must never be echoed; any count above 0 is a hit to fix
 grep -nEi 'jwt=|handoff_code=|wss?://|onkernel\.com/browser/(live|replay|cdp)|token=|session=|api[_-]?key|password|@[a-z0-9.-]+\.[a-z]{2,}' <file>
 ```
 
@@ -158,12 +159,12 @@ Strip query strings from documented URLs and remove any recorded ids. `password`
 
 ## 7. Clean up
 
-Delete the browser (this saves the profile if created with `--save-changes`) and the screenshot; `<run-tag>` is the exact value from step 3:
+Delete the browser (this saves the profile if created with `--save-changes`) and the scratch directory; `<run-tag>` is the exact value from step 3:
 
 ```bash
 kernel browsers delete <browser-id>
-rm -f /tmp/state.png
-kernel browsers list --status active --tag "run=<run-tag>" -o json | jq length   # expect 0; the account may hold other people's browsers
+rm -rf <S>
+out=$(kernel browsers list --status active --tag "run=<run-tag>" --limit 100 -o json) && jq length <<<"$out" || echo "could not check: browsers list"   # expect 0; the account may hold other people's browsers
 ```
 
 Delete a vault, item or profile only if you created it in this run for throwaway discovery and the user agrees; never one that existed before.

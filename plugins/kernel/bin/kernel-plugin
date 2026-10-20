@@ -13,7 +13,7 @@
 #     "counts": { "<rule id>": <n>, ... },
 #     "findings": [ { "id": "K001", "severity": "low|med|high", "file": "<path>", "line": <n>, "text": "<line, <=120 chars>",
 #                     "message": "<what>", "replacement": "<use this>", "url": "<doc>" } ] }
-#   lint prints key literals as found: treat its output as sensitive when K019 fires. A gitignored .env is not reported for K019.
+#   K019 rows never carry the matched line (text is "[key literal masked]"). A gitignored file is not reported for K019.
 # Text modes print one line per finding:  <file>:<line>: <id> <severity> <message>. Use <replacement>. <url>
 
 KP_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"

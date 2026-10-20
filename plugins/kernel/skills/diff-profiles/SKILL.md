@@ -31,20 +31,20 @@ This skill is user-invoked (`/kernel:diff-profiles <a> <b>`; the model cannot st
 
 ## 2. Resolve both profiles
 
-Run now:
+Run now. First check both names: each must match `^[A-Za-z0-9._-]{1,255}$` (profile names allow only these characters). If one does not, stop and ask; the names are put into shell commands.
 
 ```bash
-WORKDIR=$(mktemp -d -t profile-diff-XXXXXX); mkdir -p "$WORKDIR/a" "$WORKDIR/b" "$WORKDIR/diff"; cd "$WORKDIR"; echo "$WORKDIR"
-kernel profiles get "$A" -o json > diff/profile-a.json
-kernel profiles get "$B" -o json > diff/profile-b.json
+WORKDIR=$(mktemp -d -t profile-diff-XXXXXX) || exit 1; mkdir -p "$WORKDIR/a" "$WORKDIR/b" "$WORKDIR/diff"; cd "$WORKDIR" || exit 1; echo "$WORKDIR"
+kernel profiles get 'A_NAME' -o json > diff/profile-a.json || { echo "could not get profile A"; exit 1; }
+kernel profiles get 'B_NAME' -o json > diff/profile-b.json || { echo "could not get profile B"; exit 1; }
 jq -r '[.id,.name,.created_at,.updated_at,.last_used_at] | @tsv' diff/profile-a.json diff/profile-b.json
 ```
 
-(Replace `$A` and `$B` with the two values from the user.)
+(Replace `A_NAME` and `B_NAME` with the two validated values, keeping the single quotes. If a `get` fails, run step 7 for the printed workdir before you report.)
 
-Shell state does not persist between Bash calls. Note the printed workdir path, and start every later block with `cd <that literal path>` and use the literal profile names in place of `$A` and `$B`. Do the same for cleanup.
+Shell state does not persist between Bash calls. Note the printed workdir path, and start every later block with `cd <that literal path>` and use the literal profile names. Do the same for cleanup.
 
-**On every stop after the download step (same id, 404, "no saved data", empty archive, any error), run the cleanup step (7) first, then report.**
+**On every stop after this step (same id, 404, "no saved data", empty archive, any error), run the cleanup step (7) first, then report.**
 
 - If both resolve to the same `id`, stop and tell the user.
 - Compare `updated_at`. A profile is only written when a browser that had `save_changes: true` is deleted or times out (docs). Closing a Playwright/CDP connection does not save it, so a stale `updated_at` on B often is the answer. Say so in the report.
@@ -56,8 +56,8 @@ Shell state does not persist between Bash calls. Note the printed workdir path, 
 Run now:
 
 ```bash
-kernel profiles download "$A" --to a   # use the literal names here
-kernel profiles download "$B" --to b
+kernel profiles download 'A_NAME' --to a || echo "download of A failed"   # use the literal names here
+kernel profiles download 'B_NAME' --to b || echo "download of B failed"
 for s in a b; do echo "$s: $(find "$s" -type f | wc -l) files"; done   # counts only, no names
 ```
 
@@ -106,18 +106,18 @@ diff diff/pref-keys-a.txt diff/pref-keys-b.txt | head -60
 
 Look at `intl.*`, `profile.default_content_setting_values`, `webrtc.*`, `extensions.settings`, `dns_over_https.*`. Preferences can hold identifiers; the diff above lists key paths only. To check a value, query one known non-sensitive path (for example `jq '.intl.accept_languages'`), never the whole file.
 
-**Local Storage and Session Storage** (LevelDB, read with `strings`). LevelDB stores a value right after its key, so extracted bytes can be a token. Therefore nothing extracted is ever printed: the raw lists stay in private files, a guard discards a whole file if any line is over 40 chars or token-shaped, and only counts, lengths and the first 8 hex characters of each sha256 are shown. The private comparison files keep the full sha256 digest (an 8-hex prefix could make two distinct keys look equal); only what is printed to the user is truncated. That is enough to compare which keys and origins exist on each side (equal digest = same key). The block needs a digest tool and stops with a message if there is none:
+**Local Storage and Session Storage** (LevelDB, read with `strings`). LevelDB stores a value right after its key, so extracted bytes can be a token. Therefore nothing extracted is ever printed: the raw lists stay in private files, a guard discards a whole file if any line is over 40 chars or token-shaped, and only counts, lengths and the first 8 hex characters of each sha256 are shown. The private comparison files keep the full sha256 digest (an 8-hex prefix could make two distinct keys look equal); only what is printed to the user is truncated. That is enough to compare which keys and origins exist on each side (equal digest = same key). The block needs a digest tool and stops with a message if there is none. It avoids unquoted variables that hold commands and shell globs that can match nothing, because zsh (the macOS default) neither splits the first nor tolerates the second:
 
 ```bash
-if command -v shasum >/dev/null 2>&1; then SHA='shasum -a 256'; elif command -v sha256sum >/dev/null 2>&1; then SHA=sha256sum; else echo "No digest tool found (need shasum or sha256sum): storage comparison not checked."; exit 1; fi
+if command -v shasum >/dev/null 2>&1; then sha() { shasum -a 256; }; elif command -v sha256sum >/dev/null 2>&1; then sha() { sha256sum; }; else echo "No digest tool found (need shasum or sha256sum): storage comparison not checked."; exit 1; fi
 guard() { ! awk 'length>40 || /eyJ/ || /[A-Za-z0-9+\/_=-]{24,}/ {f=1} END{exit !f}' "$@"; }
-hfull() { while IFS= read -r k; do printf '%s %s\n' "$(printf %s "$k" | $SHA | cut -d' ' -f1)" "${#k}"; done; }
+hfull() { while IFS= read -r k; do printf '%s %s\n' "$(printf %s "$k" | sha | cut -d' ' -f1)" "${#k}"; done; }
 show() { sed -E 's/([0-9a-f]{8})[0-9a-f]{56}/\1/g'; }
 for s in a b; do
   SS=$(find "$s" -type d -name 'Session Storage' -not -path '*/Extension*' | head -1)
-  [ -n "$SS" ] && strings "$SS"/*.log "$SS"/*.ldb 2>/dev/null | grep -oE 'map-[0-9]+-[A-Za-z._0-9-]{1,41}' | sed -E 's/^map-[0-9]+-//' | sort -u > "diff/ss-raw-$s.txt"
+  [ -n "$SS" ] && find "$SS" -type f \( -name '*.log' -o -name '*.ldb' \) -exec strings {} + 2>/dev/null | grep -oE 'map-[0-9]+-[A-Za-z._0-9-]{1,41}' | sed -E 's/^map-[0-9]+-//' | sort -u > "diff/ss-raw-$s.txt"
   LS=$(find "$s" -type d -name 'Local Storage' -not -path '*/Extension*' | head -1)
-  [ -n "$LS" ] && strings "$LS"/leveldb/*.log "$LS"/leveldb/*.ldb 2>/dev/null | grep -oE '^_https?://[A-Za-z0-9.-]{1,41}(:[0-9]{1,5})?' | sort -u > "diff/ls-raw-$s.txt"
+  [ -n "$LS" ] && find "$LS/leveldb" -type f \( -name '*.log' -o -name '*.ldb' \) -exec strings {} + 2>/dev/null | grep -oE '^_https?://[A-Za-z0-9.-]{1,41}(:[0-9]{1,5})?' | sort -u > "diff/ls-raw-$s.txt"
 done
 for f in ss-raw-a ss-raw-b ls-raw-a ls-raw-b; do [ -f "diff/$f.txt" ] && ! guard "diff/$f.txt" && rm -f "diff/$f.txt" && echo "DISCARDED $f"; done
 for k in ss ls; do for s in a b; do R="diff/$k-raw-$s.txt"; [ -f "$R" ] || continue
@@ -158,7 +158,7 @@ Tie every difference to the issue; do not paste raw diffs. Likely causes, strong
 - Extension or Login Data row on A only: page behavior or autofill differs on B.
 - Local Storage origin or IndexedDB auth origin (Firebase, Clerk) populated on A only: site session state is absent on B.
 
-Profiles are last-writer-wins: if two jobs share a profile with `save_changes: true`, the later deletion overwrites the earlier. Check this when B "lost" state A had. To find a live writer, run `kernel browsers list --status active -o json` (add `--project` if one was named) and filter with `jq '.[] | select(.profile.id=="<id>") | {session_id, profile_save_changes}'`. Renaming a profile keeps its id and the old name stops resolving at once. If a script still uses the old name, that explains a 404 on one side.
+Profiles are last-writer-wins: if two jobs share a profile with `save_changes: true`, the later deletion overwrites the earlier. Check this when B "lost" state A had. To find a live writer, capture first (`out=$(kernel browsers list --status active --limit 100 -o json) || echo "could not list browsers"`; add `--project` if one was named; the default page is 20), then filter with `jq '.[] | select(.profile.id=="<id>") | {session_id, profile_save_changes}' <<<"$out"`. Renaming a profile keeps its id and the old name stops resolving at once. If a script still uses the old name, that explains a 404 on one side.
 
 ## 7. Cleanup
 

@@ -1,13 +1,14 @@
 #!/bin/sh
 # edit-tripwire.sh -- H3 (PostToolUse on Edit|Write|MultiEdit|NotebookEdit): flag deprecated Kernel identifiers the
-# agent just wrote. A rule fires only if it matches the NEW text of the tool input AND the file on disk; once per
+# agent just wrote. A rule fires only if more lines of the NEW text match it than lines of the text it replaced, AND
+# the file on disk matches; once per
 # (session, file, rule); at most 3 findings; <= 600 chars; only in detected Kernel projects whose file carries a marker;
 # files over 512 KB are skipped. Fail-open: any problem => exit 0, empty stdout.
 case "$0" in */*) KP_PLUGIN_ROOT="${0%/*}/.." ;; *) KP_PLUGIN_ROOT="./.." ;; esac
 { . "$KP_PLUGIN_ROOT/lib/common.sh" && . "$KP_PLUGIN_ROOT/lib/detect.sh" && . "$KP_PLUGIN_ROOT/lib/rules.sh"; } 2>/dev/null || exit 0
 kp_off && exit 0
 
-# stdin = kp_tool_stream: 4 metadata lines, then the new text (consumed by the rules awk)
+# stdin = kp_tool_stream old: 4 metadata lines, then the new text, a separator line and the replaced text (consumed by the rules awk)
 h3_body() {
   IFS= read -r sid; IFS= read -r cwd; IFS= read -r tool; IFS= read -r fp
   case "$tool" in Edit|Write|MultiEdit|NotebookEdit) ;; *) return 0 ;; esac
@@ -22,12 +23,14 @@ h3_body() {
   else
     [ -d "$cwd" ] || return 0
     kp_detect "$cwd" </dev/null; det="$KP_DET"
-    printf '%s\n%s\n' "$KP_DET" "$KP_DET_SUMMARY" > "$sd/detected" 2>/dev/null
+    kp_save_detected "$sd"
   fi
   [ "$det" = 1 ] || return 0
 
-  skip=0; if kp_is_envfile "$f" && kp_env_ok "$f"; then skip=1; fi
-  found="$(kp_rules_check "$f" "$skip")"
+  found="$(kp_rules_check "$f" 0)"
+  # a key literal in a gitignored file is the supported place (H4 allows it): drop K019 there; asked only when K019 fired,
+  # because the git calls behind kp_env_ok cost more than the rest of the hook
+  case "$found" in *K019*) if kp_env_ok "$f"; then found="$(printf '%s\n' "$found" | grep -v "^K019$KP_TAB")"; fi ;; esac
   [ -n "$found" ] || return 0
 
   rel="$(kp_relpath "$cwd" "$f")"
@@ -51,7 +54,7 @@ $m"; else break; fi
 main() {
   kp_read_stdin
   [ -n "$KP_JSON" ] || return 0
-  kp_tool_stream | h3_body
+  kp_tool_stream old | h3_body
 }
 
 out="$(main 2>/dev/null)" || out=""

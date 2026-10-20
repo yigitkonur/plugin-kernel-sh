@@ -29,17 +29,20 @@ import puppeteer from 'puppeteer-core';
 
 const kernel = new Kernel();
 const browser = await kernel.browsers.create(
-  { headless: true, timeout_seconds: 120 },
+  { headless: true, timeout_seconds: 120, tags: { run: process.env.RUN_ID ?? 'local' } },
   { maxRetries: 0, timeout: 30_000 }, // a retried create can duplicate
 );
 let pptr: Awaited<ReturnType<typeof puppeteer.connect>> | undefined;
 try {
-  pptr = await puppeteer.connect({ browserWSEndpoint: browser.cdp_ws_url });
-  const page = (await pptr.pages())[0] ?? (await pptr.newPage());
-  await page.goto('https://example.com');
-  console.log(await page.title()); // Example Domain
+  try {
+    pptr = await puppeteer.connect({ browserWSEndpoint: browser.cdp_ws_url });
+    const page = (await pptr.pages())[0] ?? (await pptr.newPage());
+    await page.goto('https://example.com');
+    console.log(await page.title()); // Example Domain
+  } finally {
+    await pptr?.disconnect(); // a failure here must not skip the delete below
+  }
 } finally {
-  await pptr?.disconnect();
   await kernel.browsers.deleteByID(browser.session_id).catch((e) => {
     if (!(e instanceof Kernel.NotFoundError)) throw e; // 404: the timeout already reaped it
   });
@@ -55,7 +58,7 @@ try {
 **If** your agent loop already uses the Vercel AI SDK and needs a browser tool -> **Do** create the browser yourself, pass its id to the tool, delete it in `finally`.
 
 ```bash
-# untested (not installed here); from the docs page
+# the install line is from the docs page; the tool call below ran live
 npm install @onkernel/ai-sdk zod ai @onkernel/sdk
 ```
 
@@ -65,7 +68,7 @@ import { playwrightExecuteTool } from '@onkernel/ai-sdk';
 
 const kernel = new Kernel();
 const browser = await kernel.browsers.create(
-  { headless: true, timeout_seconds: 120 },
+  { headless: true, timeout_seconds: 120, tags: { run: process.env.RUN_ID ?? 'local' } },
   { maxRetries: 0, timeout: 30_000 }, // a retried create can duplicate
 );
 try {
@@ -92,12 +95,13 @@ try {
 
 ## Stagehand (v4 and v3)
 
-**If** you want `act` / `extract` in natural language on a Kernel browser -> **Do** use v4 with the extension upload, or start from the template: `kernel create --name my-stagehand-app --language typescript --template stagehand`. The latest `@browserbasehq/stagehand` on npm was 4.2.1 on 2026-10-20 (a community pattern file says 4.2.0; the Kernel docs page states no version).
+**If** you want `act` / `extract` in natural language on a Kernel browser -> **Do** use v4 with the extension upload. (`kernel create --template stagehand` scaffolds Stagehand v3 per `kernel create --help`, so use it only if you want v3 and keep v3 and v4 apart.) The latest `@browserbasehq/stagehand` on npm was 4.2.1 on 2026-10-20 (a community pattern file says 4.2.0; the Kernel docs page states no version).
 
 v4 runs as a Chrome extension, so a remote browser needs the extension on **its** filesystem before Stagehand connects:
 
 ```ts
 // untested (needs a model key); adapted from the docs page (the docs wrap the upload in a `loadStagehandExtension(kernel, sessionId)` helper; `STAGEHAND_EXTENSION_DIR`, `STAGEHAND_EXTENSION_ZIP` and `kernel` are assumed defined)
+import { createReadStream } from 'node:fs';
 import Kernel from '@onkernel/sdk';
 import { Stagehand, localBrowser } from '@browserbasehq/stagehand';
 const ignoreNotFound = (e: unknown) => { if (!(e instanceof Kernel.NotFoundError)) throw e; };
@@ -156,9 +160,14 @@ const env = {
   KERNEL_STEALTH: 'false',
   KERNEL_TIMEOUT_SECONDS: '120',
 };
-spawnSync('npx', ['--yes', 'agent-browser', 'open', 'https://example.com'], { env, encoding: 'utf8' });
-// ... later, ALWAYS:
-spawnSync('npx', ['--yes', 'agent-browser', 'close'], { env, encoding: 'utf8' });
+const run = (args: string[]) => spawnSync('npx', ['--yes', 'agent-browser', ...args], { env, encoding: 'utf8' });
+try {
+  const opened = run(['open', 'https://example.com']);
+  if (opened.status !== 0) throw new Error(`agent-browser open failed (exit ${opened.status})`);
+  // ... drive it ...
+} finally {
+  run(['close']); // ALWAYS: its browsers carry no tags, so nothing else will find them
+}
 ```
 
 (ran live, trimmed: printed `Example Domain`, then `Browser closed`; zero active browsers afterwards.)

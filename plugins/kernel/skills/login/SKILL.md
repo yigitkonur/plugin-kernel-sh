@@ -15,7 +15,8 @@ The argument is the text after the skill name (or the line starting `ARGUMENTS:`
 Every value you place in a command (domain, profile name, credential name, project, connection id, session id, proxy id, choice id) must be validated first: names and ids against `^[A-Za-z0-9._-]{1,64}$` (a domain against the hostname grammar above). If one does not match, say so and stop. Double quotes alone do not stop injection when a value contains `$(...)`, a backtick or a quote. At the top of every Bash call (shell state does not persist) assign each validated value to a variable as a single-quoted literal, for example `domain='example.com'; profile='example-com-main'; id='abc123'`, and use only `"$domain"`, `"$profile"`, `"$cred"`, `"$project"`, `"$id"`, `"$sid"`, `"$proxy_id"`, `"$choice"` in the commands below.
 
 Rules for the whole run:
-- Never print, paste or log an API key, a `hosted_url`, a `handoff_code`, a `cdp_ws_url`, a live view URL or a replay URL. They are credentials. Keep them out of your context with `jq` projections and files written under `umask 077`.
+- Never print, paste or log an API key, a `hosted_url`, a `handoff_code`, a `cdp_ws_url`, a live view URL or a replay URL. They are credentials. Keep them out of your context with `jq` projections and files written under `umask 077`. The only exception is the single hand-over of the `hosted_url` to the user it is for (Step 4 item 4).
+- Never pipe a `kernel` command straight into `jq`: the CLI writes its errors to stderr and nothing to stdout, so `jq` would see empty input and exit 0, and a failure would look like success. Capture first, then parse: `out=$(kernel ... -o json) && jq '...' <<<"$out" || echo "could not run: <what>"`. A `could not run` line is a stop (or the branch the step names), not something to ignore.
 - Never pass a password, TOTP secret or one-time code as a CLI argument (`--value`, `--field-value`), and never use `kernel credentials create --value password=...` (its own help shows that form). A human types secrets into the hosted page, or the shipped script stores them from environment variables (Step 3 item 4).
 - Never dump `follow` or `timeline` streams; use `jq` filters and `--limit`/`--type`.
 - Never delete the connection or profile to recover. Recovery is another `login` on the same connection.
@@ -23,7 +24,7 @@ Rules for the whole run:
 
 ## Step 1. Preflight
 1. `command -v kernel`. If empty, tell the user to run `brew install kernel/tap/kernel` (or `npm i -g @onkernel/cli`) and stop. Install nothing yourself.
-2. `kernel auth context -o json | jq 'keys'`. If it fails, tell the user to run `kernel login` or set `KERNEL_API_KEY`, then stop.
+2. `out=$(kernel auth context -o json) && jq 'keys' <<<"$out" || echo "could not run: auth context"`. On `could not run`, tell the user to run `kernel login` or set `KERNEL_API_KEY`, then stop.
 3. If the user named a Kernel project, pass `--project "$project"` on every `kernel` command below, and run the credential script of Step 3 item 4 with `KERNEL_PROJECT="$project"` set for that one invocation (the script reads that variable, not `--project`; without it the credential lands in the default project).
 
 ## Step 2. Is browser auth needed, and which path
@@ -46,8 +47,9 @@ A connection ties one domain to one profile; a profile holds at most one connect
 
 1. Look for an existing one:
    ```bash
-   kernel auth connections list --domain "$domain" -o json \
-     | jq '[.[] | {id, domain, profile_name, status, can_reauth, can_reauth_reason}]'
+   out=$(kernel auth connections list --domain "$domain" -o json) \
+     && jq '[.[] | {id, domain, profile_name, status, can_reauth, can_reauth_reason}]' <<<"$out" \
+     || echo "could not run: connections list"
    ```
 2. If one matches the account the user means, reuse its `id` and `profile_name`. If several match and you cannot tell them apart, ask which profile; do not guess.
 3. If none matches, choose a stable profile name (one per end user or account). A domain-only request does not name the profile: use `<domain-slug>-main` (dots to dashes, for example `example-com-main`) only when the login belongs to the single person asking. If the profile could serve several users or accounts, ask for an opaque user or account id (lowercase letters, digits, dashes) and use `<domain-slug>-<opaque-id>`; never share one domain-wide profile across people. For a NEW connection and profile name, state what you will create (path, profile name, domain) and proceed: creation costs nothing until used and health checks are off. Wait for a yes only when a connection or profile for that domain already exists (reuse or new), before deleting anything the user did not ask you to clean up, or before `--save-changes` on an existing profile.
@@ -63,16 +65,18 @@ A connection ties one domain to one profile; a profile holds at most one connect
    Email, SMS and push codes still need a person even with a stored credential.
 5. Create the connection. Pass `--no-health-checks` unless the user asked for unattended reuse: health checks and reauths each start a billed browser session (https://www.kernel.sh/docs/auth/faq). Run exactly one of these two commands. Without a stored credential:
    ```bash
-   kernel auth connections create --domain "$domain" --profile-name "$profile" --no-health-checks -o json \
-     | jq '{id, status, can_reauth, can_reauth_reason, health_checks}'
+   out=$(kernel auth connections create --domain "$domain" --profile-name "$profile" --no-health-checks -o json) \
+     && jq '{id, status, can_reauth, can_reauth_reason, health_checks}' <<<"$out" \
+     || echo "could not run: connections create (a 409 means one exists: item 6)"
    ```
    With the credential you stored in item 4:
    ```bash
-   kernel auth connections create --domain "$domain" --profile-name "$profile" --credential-name "$cred" --no-health-checks -o json \
-     | jq '{id, status, can_reauth, can_reauth_reason, health_checks}'
+   out=$(kernel auth connections create --domain "$domain" --profile-name "$profile" --credential-name "$cred" --no-health-checks -o json) \
+     && jq '{id, status, can_reauth, can_reauth_reason, health_checks}' <<<"$out" \
+     || echo "could not run: connections create (a 409 means one exists: item 6)"
    ```
    A new connection starts `NEEDS_AUTH`, `can_reauth: false`, reason `no_prior_successful_login`. That is normal. `connections create` also creates the profile.
-6. On HTTP 409 (CLI output not run) the domain and profile already have a connection. Run `kernel auth connections list --domain "$domain" --profile-name "$profile" -o json` and reuse the exact match (the 409 body also carries `existing_id`).
+6. If the create printed `could not run` and its error says the connection exists (HTTP 409; the CLI's exact 409 text was not captured), the domain and profile already have a connection. Capture `kernel auth connections list --domain "$domain" --profile-name "$profile" -o json` as in item 1 and reuse the exact match. The SDK 409 body carries `existing_id` (verified live); the CLI only shows it if its error text does. Any other create failure: stop and report.
 7. Options, only when needed:
    - Unattended reuse: drop `--no-health-checks`; the lowest `--health-check-interval` depends on the plan, so read the 400 message instead of guessing.
    - TOTP authenticator: set `SITE_TOTP_SECRET` for the script (see `../kernel/references/logins.md`, "MFA"). Email, SMS and push codes need a human every time.
@@ -89,7 +93,7 @@ A connection ties one domain to one profile; a profile holds at most one connect
      || { rm -rf "$D"; exit 1; }
    echo "private dir: $D"
    ```
-   `mktemp -d` makes a directory only you can enter, so no one can pre-create the file or a symlink. The trap removes it if this call is interrupted; on success it stays for the next calls, so use the printed path literally (it is not a secret) and remove it in item 8.
+   `mktemp -d` makes a directory only you can enter, so no one can pre-create the file or a symlink. The trap removes it if this call is interrupted; on success it stays for the next calls, so use the printed path literally (it is not a secret). `login.json` holds the `hosted_url` and `handoff_code`: on EVERY stop after this item (the flow ended, a failed call, a user stop, any error), run `rm -rf "<private dir>"` before you report. Item 8 is the normal end of that.
    Never call `login` again to check progress or nudge a stuck flow: it starts a new flow with a different `hosted_url` and cancels the first. That is also the way to end a pending flow without deleting the connection (the previous flow shows `CANCELED` in the timeline); otherwise wait for it to expire.
 3. `follow` can block about 20 minutes but the Bash tool stops at 10. Run it in the background (`run_in_background`), writing to a private file. Do not use `timeout`: stock macOS does not have it; stop the background task yourself instead.
    ```bash
@@ -97,7 +101,7 @@ A connection ties one domain to one profile; a profile holds at most one connect
      | jq --unbuffered -c 'select(.event=="managed_auth_state") | {flow_status, flow_step, error_code}' \
      > "<private dir>/follow.log"
    ```
-   Poll every ~15 s (`sleep 15`) with the Step 5 `get` command until `flow_status` is terminal (`SUCCESS`, `FAILED`, `EXPIRED`, `CANCELED`). The hosted flow waits 10 minutes for input, so poll up to about 11 minutes, not less. Stop the background task when it is terminal or after about 11 minutes, whichever comes first. Run nothing else that changes this connection meanwhile.
+   The log is a convenience (its last line, `tail -1`, is the latest state); the `get` command is what decides. Poll every ~15 s (`sleep 15`) with the Step 5 `get` command until `flow_status` is terminal (`SUCCESS`, `FAILED`, `EXPIRED`, `CANCELED`). The hosted flow waits 10 minutes for input, so poll up to about 11 minutes, not less. Stop the background task when it is terminal or after about 11 minutes, whichever comes first. Run nothing else that changes this connection meanwhile.
 4. If `flow_step` is `AWAITING_INPUT` or `AWAITING_EXTERNAL_ACTION`, a person must act.
    - User present: do not run `open` or `xdg-open` (the URL would become a process argument). Prefer to tell the user to run `jq -r .hosted_url "<private dir>/login.json"` in their own terminal and open the result. Only if they cannot, read it once (`jq -r .hosted_url "<private dir>/login.json"`) and give it to that user in one chat message; never repeat it, log it or write it to a file. Say "Finish the login in the page you opened; I will wait here", and keep polling the same flow.
    - User not present: do not open anything. If you hold the user's credentials, store a credential (Step 3 item 4) and run `login` once on the same connection; otherwise report `AWAITING_INPUT` and stop.
@@ -109,8 +113,9 @@ A connection ties one domain to one profile; a profile holds at most one connect
 
 ## Step 5. Confirm, branch on failure, then verify in a fresh browser
 ```bash
-kernel auth connections get "$id" -o json \
-  | jq '{status, flow_status, flow_step, error_code, error_message, website_error, can_reauth, can_reauth_reason}'
+out=$(kernel auth connections get "$id" -o json) \
+  && jq '{status, flow_status, flow_step, error_code, error_message, website_error, can_reauth, can_reauth_reason}' <<<"$out" \
+  || echo "could not run: connections get"
 ```
 Proceed to the browser check only when `status` is `AUTHENTICATED` and, if a flow ran, `flow_status` is `SUCCESS`. Otherwise branch on `error_code` (https://www.kernel.sh/docs/auth/connection-lifecycle; only `awaiting_input_timeout` was seen live, the rest are untested):
 
@@ -126,13 +131,14 @@ Proceed to the browser check only when `status` is `AUTHENTICATED` and, if a flo
 | `unsupported_auth_method` | Passkeys are unsupported; the account must use password plus TOTP. |
 | `awaiting_input_timeout` | Nobody typed on the hosted page within 10 minutes. Store a credential (Step 3 item 4) or get a person to the page of a fresh `login`. Do not loop. |
 
-Never loop on a failed login. If `status` is `NEEDS_AUTH` with no `error_code`, run `login` once on the same connection. To see what happened: `kernel auth connections timeline "$id" --per-page 5 -o json | jq '.events[] | {timestamp, type, status, step, error_code}'`.
+Never loop on a failed login. If `status` is `NEEDS_AUTH` with no `error_code`, run `login` once on the same connection. To see what happened: `out=$(kernel auth connections timeline "$id" --per-page 5 -o json) && jq '.events[] | {timestamp, type, status, step, error_code}' <<<"$out" || echo "could not run: timeline"` (the output shape was not captured; if `.events` is missing, look at `jq 'keys' <<<"$out"` first).
 
 The login ran in a browser Kernel started and you never receive. Do not reuse any task browser that hit a login wall. Create a new one on the profile:
 ```bash
-kernel browsers create --profile-name "$profile" --start-url "https://$domain/" --tag run=login-check -t 240 -o json | jq '{session_id}'
+out=$(kernel browsers create --profile-name "$profile" --start-url "https://$domain/" --tag run=login-check -t 240 -o json) \
+  && jq '{session_id}' <<<"$out" || echo "could not run: browsers create"
 ```
-Keep only `session_id`. Check for a signed-in page, not a flash message:
+Keep only `session_id`. From here on, on EVERY stop (a failed `execute`, an error, a user stop) run `kernel browsers delete "$sid"` before you report, unless the user asked to keep the browser. Check for a signed-in page, not a flash message:
 ```bash
 kernel browsers playwright execute "$sid" 'return { path: new URL(page.url()).pathname, logout_links: await page.getByRole("link",{name:/log ?out|sign ?out/i}).count() }'
 ```

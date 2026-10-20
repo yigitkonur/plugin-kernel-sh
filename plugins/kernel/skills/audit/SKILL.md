@@ -14,7 +14,7 @@ You are reviewing code that uses Kernel (kernel.sh cloud browsers) and the accou
 The argument is the text after the skill name in the user's message (or the line starting `ARGUMENTS:`). It is a project path. If it is missing, use `.`. If the path does not exist, say so and stop.
 
 Rules for the whole run:
-- Read-only. Do not create, update or delete browsers, profiles, pools, apps or keys. Do not edit project files. Do not run `kernel org limits set`, `kernel deploy`, `kernel invoke` or anything that starts a browser.
+- Read-only toward the project and the account. Do not create, update or delete browsers, profiles, pools, apps or keys. Do not edit project files. (The plugin's own `kernel-plugin detect` keeps a few bytes of cache in its data or temp folder, and `claude mcp list` may health-check configured MCP servers; neither touches the project or the account.) Do not run `kernel org limits set`, `kernel deploy`, `kernel invoke` or anything that starts a browser.
 - Never print an API key, a `cdp_ws_url`, `browser_live_view_url`, `replay_view_url`, `hosted_url`, or a URL carrying `?jwt=`. Mask them as `***`. If a finding is a literal key (K019), quote only the file and line, never the value, and treat the linter output as sensitive (it prints key literals as found).
 - Never dump a command's raw JSON into the context. Project fields with `jq`.
 - Check the exit code before parsing, and never pipe a CLI into `jq` (the pipe hides the CLI's exit code, and its plain-text error such as `ERROR: Authentication required: ...` (wording unverified) would reach `jq`). Capture first: `out=$(kernel ... -o json) && jq '...' <<<"$out" || echo "could not check: <cmd>"`. Every `could not check` line goes under "Could not check" in the report.
@@ -31,7 +31,7 @@ brew install kernel/tap/kernel
 npm i -g @onkernel/cli
 ```
 
-Run `kernel --version` and keep the number for the report.
+Run `kernel --version` and keep the number for the report. Run `command -v jq` too: sections 2 and 3 project JSON fields with `jq`. If it is missing, print `brew install jq`, mark sections 2 and 3 skipped, and continue at section 4.
 
 ## 2. Check the environment
 
@@ -59,19 +59,21 @@ Read the results:
 Then check the two non-Kernel facts that cause leaks:
 
 ```bash
-git -C "$PROJECT" ls-files | grep -E '(^|/)\.env($|\.)' | grep -v -E '\.(example|sample|template)$'
+if files=$(git -C "$PROJECT" ls-files 2>/dev/null); then printf '%s\n' "$files" | grep -E '(^|/)\.env($|\.)' | grep -v -E '\.(example|sample|template)$'; else echo "could not check: not a git repository"; fi
 claude mcp list 2>/dev/null | grep -i kernel
 ```
 
-- If `git ls-files` fails with "not a git repository", skip the `.env` check and list it under "Could not check".
+- If the first command printed `could not check`, skip the `.env` check and list it under "Could not check". No output at all means no tracked `.env*` file.
 - A tracked `.env*` file (anything printed by the first command): High finding, "env file tracked by git". Do not print its contents. Check whether it holds `KERNEL_API_KEY` with `git -C "$PROJECT" grep -c KERNEL_API_KEY -- <file>` (count only).
 - Key in history (C04). If the path is a git repo, run this and print only the count, never the content:
 
 ```bash
-git -C "$PROJECT" rev-parse --git-dir >/dev/null 2>&1 && git -C "$PROJECT" log --all -G'sk_[0-9a-f]{8}-[0-9a-f]{4}-' --oneline | wc -l || echo "could not check: git history"
+if git -C "$PROJECT" rev-parse --git-dir >/dev/null 2>&1; then
+  if hist=$(git -C "$PROJECT" log --all -G'sk_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-' --oneline 2>/dev/null); then printf '%s\n' "$hist" | grep -c .; else echo "could not check: git log failed "; fi
+else echo "could not check: not a git repository"; fi
 ```
 
-  A count above 0 is a High finding, "key literal in git history" (fix: rotate the key). If it is not a git repo, list it under "Could not check".
+  A count above 0 is a High finding, "key literal in git history" (fix: rotate the key). A `could not check` line goes under "Could not check".
 - More than one line from `claude mcp list` that points at a Kernel server (`mcp.onkernel.com`), for example one from this plugin and one from `kernel mcp install`: report "duplicate Kernel MCP servers"; the model sees two tool sets that do the same thing. (`claude mcp list` output is unverified; if it fails or `claude` is missing, skip this check.)
 
 ## 3. Run the linter

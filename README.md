@@ -2,7 +2,7 @@
 
 A Claude Code plugin that makes coding agents use [Kernel](https://kernel.sh) cloud browsers correctly in TypeScript projects. It tells the agent *when and why* to use each Kernel capability, catches deprecated fields as they are written, keeps API keys out of code, and gives you workflows for the situations that actually hurt: a failed session, a login, a blocked site, a review.
 
-Every fact in it was checked against `@onkernel/sdk`, the `kernel` CLI and live runs on a real account (see [verified-facts.md](verified-facts.md)).
+The facts in it were checked against `@onkernel/sdk`, the `kernel` CLI and live runs on a real account (see [verified-facts.md](verified-facts.md)). What was not checked is marked "(unverified)" or "(untested)" in the text; the list is under "Verification status".
 
 ## Install
 
@@ -13,7 +13,7 @@ claude plugin install kernel@plugin-kernel-sh
 
 or inside Claude Code: `/plugin marketplace add yigitkonur/plugin-kernel-sh`, then `/plugin install kernel@plugin-kernel-sh`.
 
-Requirements: macOS or Linux (the hooks are POSIX `sh`; Windows is untested). `jq` is used when present. The workflows use the `kernel` CLI (`brew install kernel/tap/kernel` or `npm i -g @onkernel/cli`); the plugin never installs it for you.
+Requirements: macOS or Linux (the hooks are POSIX `sh`; Windows is untested); Claude Code 2.1.302 or later (that is the version the hooks were run on; they use the `command` plus `args` form). The hooks work without `jq`; the workflow skills need it and say so when it is missing. The workflows use the `kernel` CLI (`brew install kernel/tap/kernel` or `npm i -g @onkernel/cli`); the plugin never installs it for you.
 
 Authenticate the bundled Kernel MCP server once: run `/mcp`, pick `kernel`, and sign in with OAuth. Until then it shows as needing authentication and adds no tools. The Bearer-key variant (for CI, or a client that rejects the OAuth flow) was verified live; the interactive OAuth sign-in follows Kernel's documentation but was not completed end-to-end during this plugin's verification (see "Verification status").
 
@@ -44,14 +44,15 @@ Authenticate the bundled Kernel MCP server once: run `/mcp`, pick `kernel`, and 
 
 ## Verification status
 
-- **Live probes.** 23 topic probes ran against a real Kernel account (SDK 0.128.0, CLI 0.49.0, 2026-10-20): 153 claims confirmed, 34 refuted (claims from earlier skills, the docs or sample code that did not hold up), 4 gated by plan and 11 unclear. Every row, with its evidence, is in [verified-facts.md](verified-facts.md).
-- **Naive-agent runs.** 24 realistic tasks (screenshots, scraping, logins, vault fill, parallel visits, pools, Apps, debugging a failed session, downloads, uploads, stealth, an audit, a Next.js route, leftover cleanup, one task that needs no browser) were given to agents that knew Kernel only from these files. The final text passed 23 of 23 tasks, and a final re-run of the 13 tasks whose guidance changed passed 13 of 13, with cleanup verified each time.
-- **Code.** All 70 TypeScript snippets in the skills type-check against the installed SDK; the hook and detection tests (333) pass under `sh`, `dash` and with GNU coreutils first in `PATH`; CI repeats them on Ubuntu and macOS.
+- **Live probes.** 23 topic probes ran against a real Kernel account on 2026-10-20 (SDK 0.127.0, types re-checked on 0.128.0; CLI 0.49.0). The ledger has <!--ledger-counts-->137 confirmed, 43 refuted, 5 gated and 14 untested<!--/ledger-counts--> rows: refuted means a claim from an earlier skill, the docs or sample code did not hold up, gated means the plan or a missing model key blocked the test. Every row, with its evidence, is in [verified-facts.md](verified-facts.md).
+- **Naive-agent runs.** 24 realistic tasks (screenshots, scraping, logins, vault fill, parallel visits, pools, Apps, debugging a failed session, downloads, uploads, stealth, an audit, a Next.js route, leftover cleanup, one task that needs no browser) were given to agents that knew Kernel only from these files. The final text passed 23 of 23 tasks, and a final re-run of the 13 tasks whose guidance changed passed 13 of 13, with cleanup verified each time. This shows the guidance is enough for an agent that knows nothing else about Kernel. It is not a measurement of how much the plugin changes behavior: there was no control run without the plugin, and a few task prompts state a rule themselves.
+- **Code.** Every TypeScript snippet in the skills type-checks against the installed SDK (`scripts/typecheck-snippets.mjs`); the hook, detection and rule tests pass under `sh`, `dash` and with GNU coreutils first in `PATH`; CI runs both on Ubuntu and macOS.
 - **Not verified**, so the skills mark it "(unverified)" or "(untested)": the interactive OAuth sign-in to the bundled MCP server (the Bearer-key variant is verified), payments (Link, MPP, AgentCard), TOTP and captcha behavior beyond the lab sites, GPU browsers (plan-gated), the Kernel React component's props, and Windows.
 
 ## Privacy and safety
 
-- The plugin ships no secret and asks for none. The hooks make no network calls and never read the contents of `.env` files; they match names and one key pattern.
+- The plugin ships no secret and asks for none. The hooks make no network calls and send nothing anywhere. Project detection searches manifests, CI files and `.env*` files for Kernel marker names (not values) and keeps a small cache; the stale-identifier check reads the file you just edited; the key guard sees only the text of the tool call.
+- The key guard is a speed bump, not a vault. It checks Edit, Write, NotebookEdit and Bash input for a literal Kernel key (hex digits in either case) and lets you write one into a gitignored file. It does not see a key split over several lines, a key in an MCP tool call or in a subagent prompt.
 - Workflows print session ids and structure, never cookie values, tokens, CDP / live-view / replay URLs or hosted-login URLs.
 - If you already installed Kernel's official `kernel-cli` and `kernel-sdks` plugins, this one supersedes them for TypeScript work. Keeping both can give conflicting advice; this plugin's primer says which to trust.
 - If you also ran `kernel mcp install`, you have two Kernel MCP servers under different names; `/kernel:audit` reports that.
@@ -69,7 +70,7 @@ verified-facts.md                 evidence ledger from live runs
 DECISIONS.md                      why it is built this way
 ```
 
-Maintainers: `sh tests/run.sh --all-shells`, `scripts/validate.sh`, `scripts/secret-scan.sh --tree`. After an SDK bump, `cd lab && npm run smoke` (needs a throwaway key). CI runs the tests on Ubuntu and macOS, and a weekly job opens an issue when Kernel ships something that needs re-verifying.
+Maintainers: `sh tests/run.sh --all-shells`, `scripts/validate.sh`, `scripts/secret-scan.sh --tree` (the scripts in `scripts/` are bash: run them directly, not through `sh`). After an SDK bump, `cd lab && npm run smoke` (needs a throwaway key). CI runs the tests on Ubuntu and macOS, and a weekly job opens an issue when Kernel ships something that needs re-verifying.
 
 ## License
 

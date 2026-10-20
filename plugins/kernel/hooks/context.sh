@@ -15,13 +15,13 @@ main() {
   if [ "$kind" = session ]; then
     kp_prune
     kp_detect "$cwd"
-    printf '%s\n%s\n' "$KP_DET" "$KP_DET_SUMMARY" > "$sd/detected" 2>/dev/null
+    kp_save_detected "$sd"
   else
     if [ -f "$sd/detected" ]; then
       { IFS= read -r KP_DET; IFS= read -r KP_DET_SUMMARY; } < "$sd/detected"
     else
       kp_detect "$cwd"
-      printf '%s\n%s\n' "$KP_DET" "$KP_DET_SUMMARY" > "$sd/detected" 2>/dev/null
+      kp_save_detected "$sd"
     fi
   fi
   [ "$KP_DET" = 1 ] || return 0
