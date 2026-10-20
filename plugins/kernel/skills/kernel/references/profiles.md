@@ -56,7 +56,7 @@ try {
 }
 ```
 
-CLI: `kernel profiles create --name my-profile`, `kernel browsers create --profile-name my-profile --save-changes` (flags from the CLI source, https://github.com/kernel/kernel-cli, `cmd/profiles.go` and `cmd/browsers.go`; `--profile-id` is the alternative and the two are mutually exclusive).
+CLI: `kernel profiles create --name my-profile`, `kernel browsers create --profile-name my-profile --save-changes` (flags from the CLI source, https://github.com/kernel/cli, `cmd/profiles.go` and `cmd/browsers.go`; `--profile-id` is the alternative and the two are mutually exclusive).
 
 ## Many workers, same login
 
@@ -111,7 +111,7 @@ Lab: `query` set to the profile id returned that browser (total 1 with one write
 **If** a browser already exists and you need a profile in it
 **Do** `browsers.update(id, { profile: { name }, start_url })` only on a browser created without a profile, then reconnect: Chromium restarts and CDP clients are disconnected.
 **Avoid** loading into a browser that already has a profile (rejected by the API per the docs), and keeping a stale Playwright connection across the update.
-**Source** https://www.kernel.sh/docs/browsers/profiles/save-and-reuse#load-a-profile-after-browser-creation (untested in lab). CLI: `kernel browsers update --profile-name ... --save-changes` (https://github.com/kernel/kernel-cli).
+**Source** https://www.kernel.sh/docs/browsers/profiles/save-and-reuse#load-a-profile-after-browser-creation (untested in lab). CLI: `kernel browsers update --profile-name ... --save-changes` (https://github.com/kernel/cli).
 
 ## Rename
 

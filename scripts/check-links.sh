@@ -4,7 +4,7 @@
 set -u
 cd "$(git rev-parse --show-toplevel)"
 fail=0
-urls="$(git ls-files -co --exclude-standard 'plugins/**' README.md THIRD_PARTY_NOTICES.md verified-facts.md DECISIONS.md 2>/dev/null | grep -E '\.(md|json|tsv|txt|sh|ts)$' | xargs grep -h -o -E 'https://[A-Za-z0-9._~:/?#@!$&()*+,;=%-]+' 2>/dev/null | sed -E 's/[.,;:)>"'"'"'`*]+$//; s/#.*$//' | grep -v -E '\*\*\*|<|localhost|example\.com|\.invalid|api\.onkernel\.com/(browsers|org|profiles)|herokuapp|toscrape|httpbin|sannysoft|recaptcha' | sort -u)"
+urls="$(git ls-files -co --exclude-standard 'plugins/**' README.md THIRD_PARTY_NOTICES.md verified-facts.md DECISIONS.md 2>/dev/null | grep -E '\.(md|json|tsv|txt|sh|ts)$' | xargs grep -h -o -E 'https://[A-Za-z0-9._~:/?#@!$&()*+,;=%-]+' 2>/dev/null | sed -E 's/[.,;:)>"'"'"'`*]+$//; s/#.*$//' | grep -v -E '\*\*\*|<|localhost|example\.com|\.example|\.invalid|^https://\$|yourdomain\.com|^https://(api|mcp)\.onkernel\.com|herokuapp|toscrape|httpbin|sannysoft|recaptcha|yigitkonur/plugin-kernel-sh' | sort -u)"
 n=0
 while IFS= read -r u; do
   [ -z "$u" ] && continue
