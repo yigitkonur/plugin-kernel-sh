@@ -9,18 +9,18 @@ disable-model-invocation: true
 
 # Profile a site's bot detection with Kernel
 
-You are measuring how one website treats a Kernel stealth browser and a normal Kernel browser on the same network, naming the anti-bot vendors it uses, and recommending a Kernel configuration. Read-only toward the site (two page loads per browser: home page and a login page the analyzer finds, plus up to seven HEAD requests to common login paths when no login link is found). Creates two billable headful browsers (about 0.48 USD per hour each, so roughly a few cents for ~5 minutes; Kernel pricing page, checked 2026-10-20); you delete both before you finish.
+You are measuring how one website treats a Kernel stealth browser and a normal Kernel browser on the same network, naming the anti-bot vendors it uses, and recommending a Kernel configuration. Read-only toward the site (two page loads per browser: home page and a login page the analyzer finds, plus up to seven HEAD requests to common login paths when no login link is found). Creates two billable headful browsers (about 0.48 USD per hour each by the per-second rate on https://www.kernel.sh/docs/info/pricing, not re-measured; roughly a few cents for ~5 minutes); you delete both before you finish.
 
 Use it for a real target. A fingerprint test page such as bot.sannysoft.com cannot tell the modes apart: in a live run it gave 57 per-check results, all passing and identical in stealth and normal. If the URL is a fingerprint-test page, stop and ask for a real protected site; continue only if the user wants just that page profiled, and then state in the report that stealth and normal cannot be told apart on it.
 
-Browsers: by default both are created at once. If `concurrent_sessions_available` (step 1) is below 3, step 4 switches to the sequential variant (one browser alive at a time).
+Browsers: `concurrent_sessions_available` (step 1) decides. 3 or more: both browsers are created at once (one slot stays free for other work). 1 or 2: step 4's sequential variant (one browser alive at a time). 0, or no number: stop.
 
 The argument is the text after the skill name in the user's message (or the line starting `ARGUMENTS:`). It is a URL or hostname. If it is missing, ask for it and stop. Normalize a bare hostname to `https://<host>/`. Refuse and ask again if the URL has credentials, tokens, signed query strings, a path whose GET triggers an action, or any of `'`, `;`, `$`, a backtick or whitespace (the URL is written into a shell state file and a command). Only profile public sites the user is allowed to test (https://www.kernel.sh/docs/config-registry).
 
 Rules for the whole run:
 - Never print `KERNEL_API_KEY`, `cdp_ws_url`, `webdriver_ws_url`, `browser_live_view_url`, `base_url`, or any URL with a query string. The analyzer prints and stores no session URLs (it reports the session id only), no query strings or fragments and no cookie values, and it redacts sensitive header values. Its logs and reports still hold sanitized origin+path URLs, non-sensitive header values and request metadata, so never share them, never `cat` a log or report, and read them only through the `jq`/`grep` filters below.
-- Run one step per Bash call and keep the work directory path, run id and browser ids in `$W/state.env` (shell variables do not survive between calls). Start every call with `source "$W/state.env"` once it exists. Set the Bash timeout to 600000 ms for step 5.
-- If any step after step 4 fails, go straight to step 7 (cleanup), then report. Never leave a browser alive. Total budget: abort and clean up at 15 minutes (`$(( $(date +%s) - START ))` above 900; START is in `state.env` after step 4).
+- Run one step per Bash call and keep the work directory path, run id and browser ids in `$W/state.env` (shell variables do not survive between calls, `W` included). Step 3 prints the work directory; in every later call, start with `W='<that literal path>'; source "$W/state.env"`. Set the Bash timeout to 600000 ms for step 5.
+- If any create in step 4 fails (the normal one after the stealth one exists included), or any later step fails, go straight to step 7 (cleanup), then report. Never leave a browser alive. Total budget: abort and clean up at 15 minutes (`$(( $(date +%s) - START ))` above 900; START is in `state.env` after step 4).
 
 ## 1. Check the tools
 
@@ -35,14 +35,14 @@ test -n "${KERNEL_API_KEY:-}" && echo "key set" || echo "KERNEL_API_KEY missing"
 - `kernel` missing: print `brew install kernel/tap/kernel` and stop. Do not install anything. `jq` missing, Node older than 22, or `npm` missing: tell the user which one and stop.
 - Key missing: tell the user to export `KERNEL_API_KEY` in their environment (never paste it in chat) and stop.
 
-Then run `kernel auth context -o json | jq 'keys'` and `kernel org limits get -o json`. If auth fails, stop. If `concurrent_sessions_available` in the limits JSON is below 2 (no free slots for two browsers), tell the user and stop. A 403 on browser create later means a plan gate or spending cap: read the body, report it, stop.
+Then run `out=$(kernel auth context -o json) && jq 'keys' <<<"$out" || echo "could not run: auth context"` and `out=$(kernel org limits get -o json) && jq '{concurrent_sessions_available}' <<<"$out" || echo "could not run: org limits"` (the CLI writes errors to stderr and nothing to stdout, so a bare pipe into `jq` would hide a failure). If either prints `could not run`, stop. If `concurrent_sessions_available` is 0 or null, tell the user and stop; 1 or 2 means the sequential variant in step 4; 3 or more means both at once. A 403 on browser create later means a plan gate or spending cap: read the body, report it, stop.
 
 ## 2. Ask the config registry first
 
 The registry holds settings that already worked for a site (https://www.kernel.sh/docs/config-registry; hobbyist plan and up). `lookup` is read-only: it visits nothing and creates nothing. There is no CLI command for it, so use the SDK (`kernel.configRegistry.lookup({ url })`). The key stays in the environment, never on a command line. The SDK is installed by step 3, so run step 3 first, then this (`TARGET_URL` comes from `state.env`):
 
 ```bash
-source "$W/state.env"
+W='<work dir printed in step 3>'; source "$W/state.env"
 cd "$W/scripts" && TARGET_URL="$TARGET_URL" node --input-type=module -e '
 import Kernel from "@onkernel/sdk";
 try {
@@ -54,7 +54,7 @@ try {
 ```
 
 Read `status` first. If it is not `ok`, skip this step and put `lookup failed <status>, skipped` in the report. If it is `ok`:
-- `type: "recommendation"`: keep `browser` and `proxy_mode` for step 8 and compare them with the measured result. `proxy_mode: "managed"` means the recommendation needs a managed proxy created once and reused. This skill does not create it (it runs both browsers on direct egress); to create or find it, follow `../kernel/references/unblock.md` section 5, "a dedicated ISP proxy / managed proxy" (`kernel.proxies.create({ type: 'isp', name })`, then `kernel.proxies.check(id)`, then `kernel.browsers.create({ proxy: { id } })`; look the proxy up by name before creating another). Treat `guidance` text that names unrelated CDNs as generic, not as a finding about this target.
+- `type: "recommendation"`: keep `browser` and `proxy_mode` for step 8 and compare them with the measured result. `proxy_mode: "managed"` means the recommendation needs a managed proxy created once and reused; the recommendation's `proxy.create` payload names the proxy `type` (`isp`, `residential`, `mobile` or `custom`) to create, so read it (`rec.proxy.create.type`) instead of assuming ISP. This skill does not create it (it runs both browsers on direct egress); to create or find it, follow `../kernel/references/unblock.md` sections 1 and 5 (`kernel.proxies.create({ type, name })` with that type, then `kernel.proxies.check(id)`, then `kernel.browsers.create({ proxy: { id } })`; look the proxy up by name before creating another). Treat `guidance` text that names unrelated CDNs as generic, not as a finding about this target.
 - `type: null` (no answer): the site is not necessarily unreachable. Do not call `resolve` unless the user asks (it runs several minutes in the background); this skill's own measurement is the evidence.
 - `type: "no_recommendation"`: print `code` (`proxy_restricted`, `target_not_evaluable`, `no_working_configuration`, `inconclusive`) and `guidance`.
 
@@ -77,23 +77,23 @@ If `npm ci` fails or the URL does not parse, the block above exits before `state
 
 ## 4. Create both browsers on the same network
 
-Concurrency: from step 1 `org limits`, if free concurrent browser slots are below 3, use the sequential variant: run the stealth create block, step 5 for stealth, delete it (step 7 loop), then only the normal create line, step 5 for normal, and step 7 again, recording each id in `state.env` as it is created. It keeps the comparison fair on the same network and never has two billable browsers alive at once. Otherwise create both up front as below. Default design, "both direct": both browsers leave through Kernel's direct egress, so the only difference is stealth. Without this, stealth uses the shared ISP proxy and normal goes direct, so the test measures stealth plus proxy against normal plus direct (different egress IPs). Do not use `kernel browsers update --disable-default-proxy` for this (deprecated; the create-time form did not give direct egress in testing). Every browser is tagged `run=<work dir name>` so cleanup touches only these. Run now:
+Concurrency: from step 1, if `concurrent_sessions_available` is 1 or 2, use the sequential variant: run the stealth create block, step 5 for stealth, delete it (step 7 loop), then only the normal create line, step 5 for normal, and step 7 again, recording each id in `state.env` as it is created. It keeps the comparison fair on the same network and never has two billable browsers alive at once. Otherwise create both up front as below. Default design, "both direct": both browsers leave through Kernel's direct egress, so the only difference is stealth. Without this, stealth uses the shared ISP proxy and normal goes direct, so the test measures stealth plus proxy against normal plus direct (different egress IPs). Do not use `kernel browsers update --disable-default-proxy` for this (deprecated; the create-time form did not give direct egress in testing). Every browser is tagged `run=<work dir name>` so cleanup touches only these. The timeout counts from idle, and the analyzer runs one browser at a time for a few minutes, so the other browser sits idle: 600 s keeps it from being reaped before its own run. Run now:
 
 ```bash
-source "$W/state.env"
+W='<work dir printed in step 3>'; source "$W/state.env"
 echo "START=$(date +%s)" >> "$W/state.env"
-kernel browsers create --stealth --proxy-mode direct --viewport 1920x1080@25 --timeout 300 --tag "run=$RUN" --tag purpose=profile-site -o json > "$W/stealth.json"; echo "stealth exit $?"
+kernel browsers create --stealth --proxy-mode direct --viewport 1920x1080@25 --timeout 600 --tag "run=$RUN" --tag purpose=profile-site -o json > "$W/stealth.json"; echo "stealth exit $?"
 echo "STEALTH_ID=$(jq -r '.session_id // empty' "$W/stealth.json")" >> "$W/state.env"
 source "$W/state.env"
 if [ -n "$STEALTH_ID" ]; then
-  kernel browsers create --proxy-mode direct --viewport 1920x1080@25 --timeout 300 --tag "run=$RUN" --tag purpose=profile-site -o json > "$W/normal.json"; echo "normal exit $?"
+  kernel browsers create --proxy-mode direct --viewport 1920x1080@25 --timeout 600 --tag "run=$RUN" --tag purpose=profile-site -o json > "$W/normal.json"; echo "normal exit $?"
   echo "NORMAL_ID=$(jq -r '.session_id // empty' "$W/normal.json")" >> "$W/state.env"
 fi
 source "$W/state.env"
-for id in "$STEALTH_ID" "${NORMAL_ID:-}"; do [ -n "$id" ] && kernel browsers get "$id" -o json | jq '{session_id,stealth,headless,proxy,tags}'; done
+for id in "$STEALTH_ID" "${NORMAL_ID:-}"; do [ -n "$id" ] || continue; out=$(kernel browsers get "$id" -o json) && jq '{session_id,stealth,headless,proxy,tags}' <<<"$out" || echo "could not run: browsers get"; done
 ```
 
-If the stealth create fails (empty `STEALTH_ID`), the normal browser is not created: go to step 7, then report. Both browsers are headful (the default); defended sites flag headless. Check the printed records. Stealth must show `"stealth": true` and `"proxy": {"mode": "direct"}`; normal must show `"stealth": false` and `"proxy": {"mode": "direct"}`. If stealth shows `{"mode": "default"}`, go to step 7, then tell the user the fair comparison was not possible and offer the "platform defaults" design below. (Verified live: the session record showed `stealth: true` with `proxy.mode: direct`.)
+If the stealth create fails (empty `STEALTH_ID`), the normal browser is not created: go to step 7, then report. If the stealth browser exists but the normal create failed (empty `NORMAL_ID`), also go to step 7, then report. Both browsers are headful (the default); defended sites flag headless. Check the printed records. Stealth must show `"stealth": true` and `"proxy": {"mode": "direct"}`; normal must show `"stealth": false` and `"proxy": {"mode": "direct"}`. If stealth shows `{"mode": "default"}`, go to step 7, then tell the user the fair comparison was not possible and offer the "platform defaults" design below. (Verified live: the session record showed `stealth: true` with `proxy.mode: direct`.)
 
 Other designs, only if the user asks (name the one used in the report): "platform defaults" omits `--proxy-mode direct` on the stealth create and the result is "stealth + default proxy", never stealth alone; "same explicit proxy" adds `--proxy-id <ID>` instead of `--proxy-mode` to both creates (rotation can still change the exit IP).
 
@@ -102,7 +102,7 @@ Other designs, only if the user asks (name the one used in the report): "platfor
 Run now, one Bash call per browser (each takes up to a few minutes; the analyzer disconnects but leaves the browser alive):
 
 ```bash
-source "$W/state.env"
+W='<work dir printed in step 3>'; source "$W/state.env"
 cd "$W/scripts"
 KERNEL_BROWSER_ID="$STEALTH_ID" TARGET_URL="$TARGET_URL" BROWSER_MODE=stealth OUTPUT_DIR="$W/output" npm run analyze > "$W/stealth.log" 2>&1; echo "exit $?"
 grep -E 'BLOCKED|DATADOME|Vendor analysis completed|Test failed' "$W/stealth.log" | sed -E 's/\?[^ "]*/?***/g' | head -n 15
@@ -115,7 +115,7 @@ The logs hold no session URLs, query strings, cookie values or sensitive header 
 Run now:
 
 ```bash
-source "$W/state.env"
+W='<work dir printed in step 3>'; source "$W/state.env"
 for m in stealth normal; do
   R=$(ls -t "$W/output/$HOST/$m"/report-*.json 2>/dev/null | head -n 1)
   [ -n "$R" ] || { echo "no $m report"; continue; }
@@ -133,7 +133,7 @@ A `BLOCKED` verdict from the analyzer is a heuristic: confirm it by looking at t
 Run now. It lists active browsers 100 at a time (`--limit 100` with `--offset`; the default is 20), checks the exit status of every list call, selects yours by the `run` tag on the client side (on a shared account the server-side tag filter alone can miss yours), collects all ids first (deleting while paging would shift the offsets), then deletes one id per call and tolerates only NotFound:
 
 ```bash
-source "$W/state.env"
+W='<work dir printed in step 3>'; source "$W/state.env"
 collect() { : > "$DST"; off=0
   while :; do
     kernel browsers list --status active --limit 100 --offset "$off" -o json > "$W/list.json" || return 1
@@ -166,7 +166,7 @@ Judge the two verdicts, then pick the cheapest rung that held. Rungs are the esc
 
 Vendor notes from the analyzer (use them in "Next steps"):
 - DataDome `IP Hard Block (must change IP)`: a captcha cannot fix it; change the IP (different proxy type), do not escalate stealth.
-- Any captcha vendor with stealth on: let the solver work, do not click the widget, gate on page state with a deadline of a couple of minutes (a reCAPTCHA v2 solve took 5 to 68 seconds in testing; other vendors not verified).
+- Any captcha vendor with stealth on: let the solver work, do not click the widget, gate on page state with a deadline of a couple of minutes (a reCAPTCHA v2 solve took 5 to 67 seconds in testing, ledger P13.2; other vendors not verified).
 - Kasada flow 1 (429 on first load), Akamai `_abck` without `~0~`, Imperva reese84: fingerprint or behavior signals; stealth plus a stable IP and a returning-user profile is the next try, nothing here proves a fix.
 - A 403 with `x-kernel-proxy-error`, or a 502, is Kernel's proxy layer, not the site's bot detection (`../kernel/references/unblock.md` section 8).
 
@@ -209,4 +209,4 @@ Not verified: <list anything skipped or failed>
 ```
 
 > Checked 2026-10-20 against @onkernel/sdk 0.128.0 and kernel CLI 0.49.0.
-> Run live: the analyzer, `--stealth` with `--proxy-mode direct`, the curl form of `lookup`. Details: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
+> Run live: the analyzer, `--stealth` with `--proxy-mode direct` (ledger W5), and the registry `lookup` through raw HTTP (curl); the SDK form in step 2 is the same call and was not run as written. Details: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

@@ -7,7 +7,7 @@ set -o pipefail
 MODE="${1:---staged}"
 REPO="$(git rev-parse --show-toplevel)" || exit 2
 cd "$REPO" || exit 2
-KEY_RE='sk_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[A-Za-z0-9_-]{20,}'
+KEY_RE='sk_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.[A-Za-z0-9_-]{20,}'
 PLACEHOLDER='sk_00000000-0000-0000-0000-000000000000\.'
 HOME_RE='/Users/[A-Za-z0-9._-]+|@gmail\.com'
 URL_RE='[?&](jwt|handoff_code|access_token)=[A-Za-z0-9._~%-]{8,}'

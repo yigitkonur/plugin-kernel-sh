@@ -63,7 +63,7 @@ const key = await kernel.apiKeys.create({
 
 **Avoid** org-wide keys for agents; `days_to_expire` when you need a short expiry; assuming deleting a key kills live browser access.
 
-**Source** https://www.kernel.sh/docs/info/api-keys, https://www.kernel.sh/docs/info/api-key-permissions, `api-keys.ts` types (`APIKeyCreateParams`, `APIKeyRotateParams`), list shape verified live; scoped creation not run. Note: the policy syntax is from docs and SDK types; the minimum SDK version that has `policy` was not verified, 0.127.0 has it (0.128.0 was released since; not re-checked).
+**Source** https://www.kernel.sh/docs/info/api-keys, https://www.kernel.sh/docs/info/api-key-permissions, `api-keys.ts` types (`APIKeyCreateParams`, `APIKeyRotateParams`), list shape verified live; scoped creation not run. Note: the policy syntax is from docs and SDK types; the minimum SDK version that has `policy` was not verified; 0.127.0 and 0.128.0 both have it.
 
 ## AC3. Projects and multi-tenant setups
 

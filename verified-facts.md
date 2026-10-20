@@ -9,7 +9,7 @@ How to read this file. Each row is one claim that was tried against the live ser
 | id | claim | result | evidence |
 |---|---|---|---|
 | P01.1 | `browsers.create` returns session id, CDP URL, webdriver URL, base URL | confirmed | 16 keys incl. location, proxy, memory even when not requested |
-| P01.2 | Create response includes a live-view URL | refuted | Absent for headless; present for headful (P18.10) |
+| P01.2 | Create response includes a live-view URL for every browser | refuted | Absent for headless; present for headful (P18.10) |
 | P01.7 | Create latency is about 30 ms | refuted | Client-side wall time p50 about 333 ms, max 836 ms (n=5); delete about 200-227 ms |
 | P01.9 | Only `deleteByID` deletes; there is no `browsers.delete` | confirmed | `typeof browsers.delete` is undefined |
 | P01.10 | Retrieve after delete | confirmed | Default 404 NotFoundError; `include_deleted: true` returns the record with `deleted_at`, no status field |
@@ -287,11 +287,11 @@ Still open after round 4, by design: the interactive OAuth sign-in to the Kernel
 
 | id | claim | result | evidence |
 |---|---|---|---|
-| M1 | A Bearer API key in a project-style `.mcp.json` header (`Bearer ${KERNEL_API_KEY}`) connects to the hosted Kernel MCP | confirmed | Status connected, 31 tools; `get_connection_context` and `search_docs` answered |
-| M2 | The same config with the variable unset | confirmed | Server status failed (visible failure, not a silent unauthenticated session) |
-| M3 | The plugin-bundled `.mcp.json` (OAuth, no secret) before authentication | confirmed | Status needs-auth, registers no Kernel tools; the user authenticates once through `/mcp` |
-| M4 | Context cost of the Kernel MCP tools after authentication | confirmed | About +1,040 input tokens for a trivial prompt (tools are deferred, names only) |
-| M5 | OAuth completes in Claude Code | untested | Needs a human browser step |
+| MC1 | A Bearer API key in a project-style `.mcp.json` header (`Bearer ${KERNEL_API_KEY}`) connects to the hosted Kernel MCP | confirmed | Status connected, 31 tools; `get_connection_context` and `search_docs` answered |
+| MC2 | The same config with the variable unset | confirmed | Server status failed (visible failure, not a silent unauthenticated session) |
+| MC3 | The plugin-bundled `.mcp.json` (OAuth, no secret) before authentication | confirmed | Status needs-auth, registers no Kernel tools; the user authenticates once through `/mcp` |
+| MC4 | Context cost of the Kernel MCP tools after authentication | confirmed | About +1,040 input tokens for a trivial prompt (tools are deferred, names only) |
+| MC5 | OAuth completes in Claude Code | untested | Needs a human browser step |
 
 ## Triggering and coexistence (lead checks, Claude Code 2.1.302)
 

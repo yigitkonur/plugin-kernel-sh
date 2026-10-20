@@ -10,7 +10,7 @@ All code assumes `import Kernel from '@onkernel/sdk'` and `const kernel = new Ke
 - headful (the default), the default viewport, and a start at the home page, not a deep link;
 - `stealth: true` (shared ISP proxy plus captcha solver, section 3);
 - a managed proxy of your own only when the site needs a geo or a residential reputation (sections 5 and 6);
-- verify against the site itself (does the real flow complete?), not a fingerprint page: stealth showed no measurable difference on bot.sannysoft.com.
+- verify against the site itself (does the real flow complete?), not a fingerprint page: our one stealth-versus-normal comparison on bot.sannysoft.com could not extract per-check rows (ledger P12.2, untested), so it proves nothing either way.
 
 ## 1. New target site: ask the registry before guessing
 
@@ -141,11 +141,12 @@ try {
   const timer = setTimeout(() => stream.controller.abort(), 120_000); // deadline: abort ends the loop
   let solved = false;
   try {
-    for await (const frame of stream as AsyncIterable<any>) {
-      const ev = frame.event;                     // frames are wrapped: { seq, event: { type, category, data } }
-      if (ev?.category === 'captcha') {           // top-level frame.type / frame.category are undefined
-        console.log(ev.type, ev.data?.status, ev.data?.task_id);
-        if (ev.type === 'captcha_challenge_result' && ev.data?.status === 'solved') { solved = true; break; }
+    for await (const frame of stream) {
+      const ev = frame.event;                     // frames are wrapped, in the SDK types too: { seq, event: { type, category, data } }
+      if (ev.category === 'captcha') {            // frame.type and frame.category do not exist
+        const data = ev.data as { status?: string; task_id?: string }; // the data union differs per event type
+        console.log(ev.type, data.status, data.task_id);
+        if (ev.type === 'captcha_challenge_result' && data.status === 'solved') { solved = true; break; }
       }
     }
   } catch { /* a stream termination error (including our abort) is a normal end */ }
@@ -157,11 +158,11 @@ try {
   });
 }
 ```
-(hand-written from a live frame dump; the unwrap was confirmed from live frames, but this loop is untested as written. The live test matched on raw text.)
+(hand-written from a live frame dump; the frame shape was confirmed live, but this loop is untested as written. The live test matched on raw text.)
 
 What was seen live on the reCAPTCHA v2 demo (stealth, headful): `captcha_solve_started` (task_kind `image_challenge`), `captcha_solve_result` (status `success`, `duration_ms` about 1.3 s), `captcha_challenge_result` (status `solved`). The page then said "Verification Success". Time from navigation to token varied 5 s, 30 s and 68 s across three runs, so give the wait a deadline of a couple of minutes, not seconds.
 
-- **Wrapped frames refute the SDK types**: the types declare `category`/`type`/`data` at the top of each stream frame, live frames nest them under `event`. Filtering on the top level silently matches nothing.
+- **Frames are wrapped**: each stream frame is `{ seq, event: { type, category, data } }` (SDK type `TelemetryStreamResponse`, confirmed on live frames). Filtering on a top-level `type` or `category` silently matches nothing.
 - Join a start to its result on `task_id` only. Delivery is best-effort and unordered, so every wait needs a deadline and a fallback to reading the page.
 - Use `captcha_provider` (`recaptcha_v2`) and `task_kind`. **Avoid** `captcha_type`: deprecated, and on solve events it read `other`.
 - The stream ends with `TypeError: terminated` when the browser is deleted. Catch it.

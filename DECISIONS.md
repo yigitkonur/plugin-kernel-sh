@@ -20,7 +20,18 @@ Why the plugin looks the way it does. Each row is something a contributor might 
 | SessionStart + SubagentStart primer | Only when Kernel is detected; about 1.1k characters; also after compaction and fork | An agent cannot know this project uses Kernel until it opens a file; subagents do not inherit SessionStart context. |
 | PostToolUse stale-identifier tripwire | Reports a rule only if it matches the file on disk and the text just written; at most 3 findings | Deprecated fields get copied from Kernel's own docs and sample skills at write time. Untouched legacy lines are not re-reported. |
 | PreToolUse API-key guard | Deny Kernel key literals in tool input; allow a gitignored `.env`; always deny in Bash | The key format is precise enough to deny without false positives; a leaked key is expensive. |
-| POSIX sh, fail-open, no network, no `timeout` binary | Works on macOS and Linux with stock tools. A broken hook must never block work. `KERNEL_PLUGIN_HOOKS=off` disables all. |
+| All hooks | POSIX sh, fail-open, no network, no `timeout` binary | Works on macOS and Linux with stock tools. A broken hook must never block work. `KERNEL_PLUGIN_HOOKS=off` disables all. |
+
+## Hooks: limits chosen on purpose (1.0.1)
+
+| Decision | Reason |
+|---|---|
+| The key guard is a speed bump, not a vault: Edit, Write, MultiEdit, NotebookEdit and Bash input only; a key split over lines, in an MCP call or in a subagent prompt is not seen | A regex over tool input cannot be complete, and a false deny blocks real work. The README says so. |
+| Any gitignored file may hold a key; outside a git repo only `.env`-named files may | Nothing can commit a gitignored file; outside git there is no ignore rule to rely on. |
+| The all-zero placeholder key is treated as a key by the guard | The tests need a harmless literal to exercise the deny path. |
+| The tripwire compares the lines an edit wrote with the lines it replaced | Kernel's docs show deprecated fields, so the moment of writing is what matters; a legacy line the edit only keeps as context is not news. Without `jq` only Edit and Write supply the replaced text. |
+| A README or docs file that mentions `@onkernel/` or `KERNEL_API_KEY` still marks a project as Kernel | A project that documents installing the Kernel CLI usually uses it (a fixture asserts this); the cost of a wrong guess is one primer. |
+| Big non-git trees (over 5000 files, `KP_SCAN_MAX_FILES`) are searched in manifests and config files only; an abandoned scan is not repeated for ten minutes | A hook has a 10 s limit and no `timeout` binary; failing to detect costs one primer, a stuck hook costs every edit. |
 
 ## Rejected or deferred
 

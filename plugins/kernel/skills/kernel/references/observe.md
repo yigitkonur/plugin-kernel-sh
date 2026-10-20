@@ -44,7 +44,9 @@ try {
   );
   if (!r.success) throw new Error(String(r.error));
 } finally {
-  if (replayId) await kernel.browsers.replays.stop(replayId, { id_or_name: id }).catch(() => {});
+  if (replayId) await kernel.browsers.replays.stop(replayId, { id_or_name: id }).catch((e) => {
+    if (!(e instanceof Kernel.NotFoundError)) throw e; // already stopped or gone: fine
+  });
   // a 404 means the timeout already reaped the browser: that is fine
   await kernel.browsers.deleteByID(id).catch((e) => {
     if (!(e instanceof Kernel.NotFoundError)) throw e;

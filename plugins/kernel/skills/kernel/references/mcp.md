@@ -23,7 +23,7 @@ The bundled config is `plugins/kernel/.mcp.json` (an `http` server at the endpoi
 | CI, scripts, or a client that fails OAuth with an issuer mismatch (strict RFC 9207 check) | `Authorization: Bearer <Kernel API key>`; non-JWT bearers are treated as API keys | Pasting the key into a committed config; read it from the environment |
 
 - Verified live: Bearer key -> `initialize` 200 with an `mcp-session-id` header; no key -> 401 with `WWW-Authenticate: Bearer realm="OAuth", error="invalid_token"`. A 200 with `x-clerk-auth-message: Invalid JWT form` on a key is expected, not an error.
-- Whether `${KERNEL_API_KEY}` header expansion in a Claude Code `.mcp.json` works is (unverified: not tested). An unset variable is sent literally, so a missing `KERNEL_API_KEY` gives a bad Bearer header rather than a clear error (Claude Code docs, `mcp#environment-variable-expansion`; unverified).
+- `Authorization: Bearer ${KERNEL_API_KEY}` in a Claude Code `.mcp.json` header expands: the server connected with 31 tools (ledger MC1). With the variable unset the server showed status `failed`, a visible failure and not a silent unauthenticated session (ledger MC2).
 - Source: https://www.kernel.sh/docs/reference/mcp-server/authentication, https://www.kernel.sh/docs/reference/mcp-server/troubleshooting
 
 ## M4. First call: who am I
@@ -66,8 +66,8 @@ Never print the session id. Responses are SSE: parse the `data: ` line.
 
 | Situation | Do | Avoid | Source |
 |---|---|---|---|
-| How does X work in Kernel | `search_docs` `{ query }`. Returns text (not structured content): markdown headed `## N. <page>`; got 10 hits for "browser pools" | Guessing a flag before checking | https://www.kernel.sh/docs/reference/mcp-server/tools/search-docs |
-| Make, list, inspect, delete a browser | `manage_browsers` `action: create\|update\|list\|get\|get_telemetry\|delete`; `remote_forward` (`remoteport:host:localport`) exposes a local dev server to the browser | Calling `delete` without `session_id`; trusting the docs action list (it omits `update` and `get_telemetry`; the live schema has all six) | https://www.kernel.sh/docs/reference/mcp-server/tools/manage-browsers |
+| How does X work in Kernel | `search_docs` `{ query }`. Returns text (not structured content): markdown headed `## N. <page>` (ranked doc sections, ledger P21.4) | Guessing a flag before checking | https://www.kernel.sh/docs/reference/mcp-server/tools/search-docs |
+| Make, list, inspect, delete a browser | `manage_browsers` `action: create\|update\|list\|get\|get_telemetry\|delete`; `remote_forward` (`remoteport:host:localport`) exposes a local dev server to the browser | Calling `delete` without `session_id`; trusting the docs action list (it omits `update` and `get_telemetry`; the live tool schema listed all six in the lab run; not a ledger row) | https://www.kernel.sh/docs/reference/mcp-server/tools/manage-browsers |
 | One-off page check | `execute_playwright_code` `{ session_id, code }`; `return` the value you need. Verified live: `page.goto('https://example.com'); return await page.title()` worked | Expecting it to create or delete the browser (`session_id` is required) | verified live |
 | Screenshot | `computer_action` with `screenshot` | `page.screenshot()` inside the code (docs prefer `computer_action`) | https://www.kernel.sh/docs/reference/mcp-server/tools/execute-playwright-code |
 | Record video | `manage_replays` `action: start\|stop\|list` | Using a headless browser (docs: needs headful; leave `headless` unset); assuming your plan allows it (paid plan: unverified; start/stop not called live) | https://www.kernel.sh/docs/reference/mcp-server/tools/manage-replays |
@@ -92,7 +92,7 @@ Never print the session id. Responses are SSE: parse the `data: ` line.
 
 ## M9. Known unknowns
 
-- Whether plugin MCP tools load deferred in Claude Code (context cost): (unverified).
+- Context cost in Claude Code is measured: the tools load deferred, about +1,040 tokens for a trivial prompt (ledger MC4).
 - Whether Kernel OAuth passes a strict RFC 9207 issuer check: (unverified); the docs recommend an API key if it does not.
 - MCP `manage_replays`, file read/download, and create/delete without `context`: (untested).
 

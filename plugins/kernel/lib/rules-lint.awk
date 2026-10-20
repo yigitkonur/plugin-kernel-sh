@@ -7,6 +7,7 @@ BEGIN {
 {
   for (r = 1; r <= n; r++) if ($0 ~ re[r]) {
     t = $0; gsub(/\t/, " ", t); sub(/^[[:space:]]+/, "", t); if (length(t) > 120) t = substr(t, 1, 120)
+    if (id[r] == "K019") t = "[key literal masked]"
     print FILENAME "\t" FNR "\t" id[r] "\t" sev[r] "\t" t "\t" msg[r] "\t" rep[r] "\t" url[r]
   }
 }

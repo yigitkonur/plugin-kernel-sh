@@ -7,6 +7,8 @@
 #    hooks.json, SKILL.md or README, exists  (a line containing "novalidate" is skipped)
 #  5 size limits: SKILL.md <= 300 lines, references <= 350 lines, description <= 600 chars
 #  6 VERSION == plugin.json == marketplace.json (metadata and plugin entry)
+#  7 THIRD_PARTY_NOTICES.md ships inside the plugin and matches the root copy; 8 no $N / $ARGUMENTS in SKILL.md bodies
+#  9 the ledger counts quoted in README.md match verified-facts.md
 set -u; shopt -s nullglob
 cd "$(git rev-parse --show-toplevel)" || exit 2
 P=plugins/kernel; fail=0
@@ -74,6 +76,10 @@ cmp -s THIRD_PARTY_NOTICES.md "$P/THIRD_PARTY_NOTICES.md" || bad "THIRD_PARTY_NO
 if grep -n -E '\$([0-9]|ARGUMENTS)' "$P"/skills/*/SKILL.md >/dev/null 2>&1; then
   bad "a SKILL.md contains \$N or \$ARGUMENTS, which Claude Code rewrites: $(grep -n -E '\$([0-9]|ARGUMENTS)' "$P"/skills/*/SKILL.md | head -3 | cut -c1-120)"
 fi
+
+# 9 the ledger counts quoted in the README match verified-facts.md (probe rows P*, R*, MC*)
+counts="$(awk -F'|' 'NF >= 5 && $2 ~ /^ *(P[0-9]|R[0-9]|MC[0-9])/ { v = $4; gsub(/ /, "", v); c[v]++ } END { printf "%d confirmed, %d refuted, %d gated and %d untested", c["confirmed"], c["refuted"], c["gated"], c["untested"] }' verified-facts.md)"
+grep -q -F "<!--ledger-counts-->$counts<!--/ledger-counts-->" README.md || bad "README ledger counts differ from verified-facts.md (expected: $counts)"
 
 [ $fail = 0 ] && echo "validate: OK"
 exit $fail

@@ -38,7 +38,7 @@ has()  { case "$1" in *"$2"*) return 0 ;; esac; return 1; }
 t_empty()    { if [ -z "$2" ]; then ok "$1"; else bad "$1" "expected empty output, got: $(printf '%s' "$2" | cut -c1-200)"; fi; }
 t_contains() { if has "$2" "$3"; then ok "$1"; else bad "$1" "missing '$3' in: $(printf '%s' "$2" | cut -c1-200)"; fi; }
 t_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected '$3', got '$2'"; fi; }
-t_json()     { if [ "$KP_HAVE_JQ" = 1 ]; then if printf '%s' "$2" | jq -e . >/dev/null 2>&1; then ok "$1"; else bad "$1" "invalid JSON"; fi; fi; }
+t_json()     { if [ "$KP_HAVE_JQ" = 1 ]; then if printf '%s' "$2" | jq -e . >/dev/null 2>&1; then ok "$1"; else bad "$1" "invalid JSON"; fi; else skip "$1" "needs jq to validate"; fi; }
 
 # copy a fixture dir into $W and make it usable; $3 = git to `git init` it (untracked files: exercises git grep --untracked)
 stage() { # stage <fixture-dir> <dest> [git]
@@ -136,8 +136,22 @@ for id in $IDS; do
   fi
 done
 t_contains "K002 message says proxy_id is valid on browser pools" "$(awk -F'\t' '$1 == "K002" { print $4 }' "$P/rules/stale-api.tsv")" "valid on browser pools"
+# QC pass: an abandoned scan leaves a marker (no rescan for 10 minutes, answer unknown); big non-git trees are not walked
+SM="$W/scan/marker"; stage "$F/detect/pos/import-single-quote" "$SM"
+"$KP_SH" "$P/bin/kernel-plugin" detect --json "$SM" >/dev/null 2>&1
+SMC="$(ls "$CLAUDE_PLUGIN_DATA"/state/detect-*-marker 2>/dev/null | head -1)"
+if [ -n "$SMC" ]; then
+  rm -f "$SMC"; : > "$SMC.scan"
+  t_contains "detect: a fresh abandoned-scan marker skips the scan" "$("$KP_SH" "$P/bin/kernel-plugin" detect --json "$SM")" '"detected":false'
+  touch -t 202001010000 "$SMC.scan"
+  t_contains "detect: a marker older than 10 minutes is ignored and the scan runs" "$("$KP_SH" "$P/bin/kernel-plugin" detect --json "$SM")" '"detected":true'
+  [ -e "$SMC.scan" ] && bad "detect removes its scan marker when the scan ends" "still there" || ok "detect removes its scan marker when the scan ends"
+else bad "detect cache file for the marker test" "not found"; fi
+SC="$W/scan/cap"; stage "$F/detect/pos/import-single-quote" "$SC"; SC2="$W/scan/cap2"; stage "$F/detect/pos/import-single-quote" "$SC2"
+t_contains "detect: a non-git tree over KP_SCAN_MAX_FILES is not walked" "$(KP_SCAN_MAX_FILES=0 "$KP_SH" "$P/bin/kernel-plugin" detect --json "$SC")" '"detected":false'
+t_contains "detect: the same tree under the default cap is detected" "$("$KP_SH" "$P/bin/kernel-plugin" detect --json "$SC2")" '"detected":true'
 # the K019 rule (awk/ERE without intervals) and the H4 regex must agree
-for s in "$KEY" "sk_00000000-0000-0000-0000-000000000000.AAAAAAAAAAAAAAAAAAA" "sk_0000000-0000-0000-0000-000000000000.AAAAAAAAAAAAAAAAAAAAAAAA" "sk_ABCDEF00-0000-0000-0000-000000000000.AAAAAAAAAAAAAAAAAAAAAAAA" "x sk_00000000-0000-0000-0000-000000000000.abcdefghij_klmnopqr-stu y"; do
+for s in "$KEY" "sk_00000000-0000-0000-0000-000000000000.AAAAAAAAAAAAAAAAAAA" "sk_0000000-0000-0000-0000-000000000000.AAAAAAAAAAAAAAAAAAAAAAAA" "$(printf 'sk_%s-0000-0000-0000-000000000000.AAAAAAAAAAAAAAAAAAAAAAAA' ABCDEF00)" "x sk_00000000-0000-0000-0000-000000000000.abcdefghij_klmnopqr-stu y"; do
   a=0; b=0
   printf '%s\n' "$s" | grep -E -q "$(awk -F'\t' '$1 == "K019" { print $3 }' "$P/rules/stale-api.tsv")" && a=1
   printf '%s\n' "$s" | grep -E -q "$KP_KEY_RE" && b=1
@@ -194,6 +208,10 @@ t_empty "H2 silent in a non-kernel project" "$(payload "$F/payloads/SubagentStar
 mkdir -p "$CLAUDE_PLUGIN_DATA/state/old-entry"; touch -t 202001010000 "$CLAUDE_PLUGIN_DATA/state/old-entry"
 payload "$F/payloads/SessionStart.startup.json" "$KPROJ" "$(newsid)" | run_hook context.sh session >/dev/null
 [ -d "$CLAUDE_PLUGIN_DATA/state/old-entry" ] && bad "H1 prunes state older than 7 days" "still there" || ok "H1 prunes state older than 7 days"
+# QC pass: without CLAUDE_PLUGIN_DATA the state lives in a private per-user directory
+PT="$W/priv"; mkdir -p "$PT"
+payload "$F/payloads/SessionStart.startup.json" "$KPROJ" "$(newsid)" | env -u CLAUDE_PLUGIN_DATA TMPDIR="$PT" USER=kptester "$KP_SH" "$P/hooks/context.sh" session >/dev/null 2>&1
+t_eq "state dir without CLAUDE_PLUGIN_DATA is private (mode 700)" "$(ls -ld "$PT/kernel-plugin-state-kptester" 2>/dev/null | cut -c1-10)" "drwx------"
 
 # ---------------------------------------------------------------- H3
 echo "--- H3"
@@ -215,6 +233,24 @@ LEG="$W/h3/legacy"; stage "$F/detect/pos/package-json" "$LEG" git; mkdir -p "$LE
 printf "import Kernel from '@onkernel/sdk';\nconst p = { proxy_id: 'x' };\nexport const a = 2\n" > "$LEG/my dir/naïve café.ts"
 out="$(payload "$F/payloads/PostToolUse.Edit.json" "$LEG" "$(newsid)" | sed 's#"originalFile":"export const a = 1#"originalFile":"const p = { proxy_id: 1 };\\nexport const a = 1#' | run_hook edit-tripwire.sh)"
 t_empty "H3 editing another line of a legacy proxy_id file -> silent" "$out"
+# QC pass: a legacy line an Edit only keeps as context is not "just written"; a newly added one is
+LG2="$W/h3/legacy2"; stage "$F/detect/pos/package-json" "$LG2" git
+printf "import Kernel from '@onkernel/sdk';\nconst p = { proxy_id: 'x' };\nexport const a = 2;\n" > "$LG2/a.ts"
+mk_edit() { # mk_edit <sid> <old> <new>  (old/new are JSON-escaped text)
+  printf '{"session_id":"%s","cwd":"%s","hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_path":"%s/a.ts","old_string":"%s","new_string":"%s"},"tool_response":{"filePath":"%s/a.ts","oldString":"%s","newString":"%s"}}' "$1" "$LG2" "$LG2" "$2" "$3" "$LG2" "$2" "$3"
+}
+CTX_OLD="const p = { proxy_id: 'x' };\\nexport const a = 1;"; CTX_NEW="const p = { proxy_id: 'x' };\\nexport const a = 2;"
+t_empty "H3 Edit that keeps a legacy proxy_id line as context -> silent" "$(mk_edit "$(newsid)" "$CTX_OLD" "$CTX_NEW" | run_hook edit-tripwire.sh)"
+t_empty "H3 same, jq absent (sed fallback) -> silent" "$(mk_edit "$(newsid)" "$CTX_OLD" "$CTX_NEW" | KP_NO_JQ=1 "$KP_SH" "$P/hooks/edit-tripwire.sh" 2>/dev/null)"
+printf "import Kernel from '@onkernel/sdk';\nconst p = { proxy_id: 'x' };\nconst q = { proxy_id: 'y' };\n" > "$LG2/a.ts"
+t_contains "H3 Edit that adds a second proxy_id line -> finding K002" "$(mk_edit "$(newsid)" "const p = { proxy_id: 'x' };" "const p = { proxy_id: 'x' };\\nconst q = { proxy_id: 'y' };" | run_hook edit-tripwire.sh)" ' K002 '
+t_contains "H3 Edit that replaces another field with proxy_id -> finding K002" "$(mk_edit "$(newsid)" "const q = { id: 'y' };" "const q = { proxy_id: 'y' };" | run_hook edit-tripwire.sh)" ' K002 '
+mk_write() { # mk_write <sid> <content-json> <originalFile-json or null>
+  printf '{"session_id":"%s","cwd":"%s","hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":"%s/a.ts","content":"%s"},"tool_response":{"type":"update","filePath":"%s/a.ts","originalFile":%s}}' "$1" "$LG2" "$LG2" "$2" "$LG2" "$3"
+}
+WCONT="import Kernel from '@onkernel/sdk';\\nconst p = { proxy_id: 'x' };\\nconst q = { proxy_id: 'y' };\\n"
+t_empty "H3 Write that rewrites a file with the same legacy lines -> silent" "$(mk_write "$(newsid)" "$WCONT" "\"$WCONT\"" | run_hook edit-tripwire.sh)"
+t_contains "H3 Write of a new file with proxy_id (originalFile null) -> finding K002" "$(mk_write "$(newsid)" "$WCONT" null | run_hook edit-tripwire.sh)" ' K002 '
 # non-Kernel project
 PL="$W/h3/plain"; stage "$F/detect/neg/plain-ts" "$PL" git; mkdir -p "$PL/my dir"
 printf "const o = { disable_default_proxy: true };\n" > "$PL/my dir/naïve café.ts"
@@ -293,15 +329,29 @@ t_contains "H4 NotebookEdit with a key -> deny" "$nb" '"permissionDecision":"den
 rm -f "$FILE"; printf "import Kernel from '@onkernel/sdk';\nconst o = { disable_default_proxy: true };\n" > "$FILE"
 t_contains "H4 deny with jq absent (sed fallback)" "$(wr "$G1" src/config.ts | KP_NO_JQ=1 "$KP_SH" "$P/hooks/secret-guard.sh" 2>/dev/null)" '"permissionDecision":"deny"'
 t_empty "H4 .env allowed with jq absent (sed fallback)" "$(wr "$G1" .env | KP_NO_JQ=1 "$KP_SH" "$P/hooks/secret-guard.sh" 2>/dev/null)"
+# QC pass: uppercase-hex keys, any gitignored file, lint never echoes a key
+KEYU="$(printf '%s' "$KEY" | sed 's/00000000-0000/ABCDEF00-ABCD/')"
+t_contains "H4 uppercase-hex key in src/config.ts -> deny" "$(wr "$G1" src/config.ts | sed "s#$KEY#$KEYU#g" | run_hook secret-guard.sh)" '"permissionDecision":"deny"'
+printf '*.local.*\n' >> "$G1/.gitignore"
+t_empty "H4 Write to a gitignored non-.env file (kernel.local.ts) -> allow (silent)" "$(wr "$G1" src/kernel.local.ts | run_hook secret-guard.sh)"
+t_contains "H4 Write to a tracked-style file next to it (src/kernel.ts) -> deny" "$(wr "$G1" src/kernel.ts | run_hook secret-guard.sh)" '"permissionDecision":"deny"'
+LK="$W/lintkey"; mkdir -p "$LK"; printf 'export const k = "%s";\n' "$KEY" > "$LK/k.ts"
+LKOUT="$("$KP_SH" "$P/bin/kernel-plugin" lint "$LK" --json 2>&1)"; LKTXT="$("$KP_SH" "$P/bin/kernel-plugin" lint "$LK" 2>&1)"
+t_contains "lint reports K019 for a key literal" "$LKOUT" '"id":"K019"'
+has "$LKOUT$LKTXT" "AAAAAAAAAAAAAAAAAAAAAAAA" && bad "lint never echoes the key" "key text present in lint output" || ok "lint never echoes the key"
+t_contains "lint masks the K019 text" "$LKOUT" '[key literal masked]'
 t_contains "H3 finding with jq absent (sed fallback)" "$(mk_add "$(newsid)" | KP_NO_JQ=1 "$KP_SH" "$P/hooks/edit-tripwire.sh" 2>/dev/null)" ' K001 '
 
 # ---------------------------------------------------------------- opt-out and garbage
 echo "--- opt-out / garbage"
-for h in "context.sh session" "context.sh subagent" edit-tripwire.sh secret-guard.sh; do
-  set -- $h
-  out="$(payload "$F/payloads/SessionStart.startup.json" "$KPROJ" "$(newsid)" | KERNEL_PLUGIN_HOOKS=off "$KP_SH" "$P/hooks/$1" $2 2>/dev/null)"
-  t_empty "KERNEL_PLUGIN_HOOKS=off silences $h" "$out"
-done
+# each case feeds a payload that WOULD produce output, and a control proves it does without the switch
+sidc="$(newsid)"
+t_contains "control: context.sh session outputs a primer" "$(payload "$F/payloads/SessionStart.startup.json" "$KPROJ" "$sidc" | "$KP_SH" "$P/hooks/context.sh" session 2>/dev/null)" 'kernel plugin'
+t_empty "KERNEL_PLUGIN_HOOKS=off silences context.sh session" "$(payload "$F/payloads/SessionStart.startup.json" "$KPROJ" "$(newsid)" | KERNEL_PLUGIN_HOOKS=off "$KP_SH" "$P/hooks/context.sh" session 2>/dev/null)"
+t_contains "control: context.sh subagent outputs a primer" "$(payload "$F/payloads/SubagentStart.json" "$KPROJ" "$(newsid)" | "$KP_SH" "$P/hooks/context.sh" subagent 2>/dev/null)" 'kernel plugin'
+t_empty "KERNEL_PLUGIN_HOOKS=off silences context.sh subagent" "$(payload "$F/payloads/SubagentStart.json" "$KPROJ" "$(newsid)" | KERNEL_PLUGIN_HOOKS=off "$KP_SH" "$P/hooks/context.sh" subagent 2>/dev/null)"
+t_contains "control: H4 denies the same payload without the switch" "$(wr "$G1" src/config.ts | "$KP_SH" "$P/hooks/secret-guard.sh" 2>/dev/null)" '"permissionDecision":"deny"'
+t_contains "control: H3 reports the same payload without the switch" "$(mk_add "$(newsid)" | "$KP_SH" "$P/hooks/edit-tripwire.sh" 2>/dev/null)" ' K001 '
 out="$(wr "$G1" src/config.ts | KERNEL_PLUGIN_HOOKS=off "$KP_SH" "$P/hooks/secret-guard.sh" 2>/dev/null)"; t_empty "KERNEL_PLUGIN_HOOKS=off silences a would-be H4 deny" "$out"
 out="$(mk_add "$(newsid)" | KERNEL_PLUGIN_HOOKS=off "$KP_SH" "$P/hooks/edit-tripwire.sh" 2>/dev/null)"; t_empty "KERNEL_PLUGIN_HOOKS=off silences a would-be H3 finding" "$out"
 for nojq in "" 1; do
@@ -318,6 +368,17 @@ done
 # unwritable state dir must not break a hook
 out="$(payload "$F/payloads/SessionStart.startup.json" "$KPROJ" "$(newsid)" | CLAUDE_PLUGIN_DATA=/proc/nonexistent/x "$KP_SH" "$P/hooks/context.sh" session 2>/dev/null)"; rc=$?
 [ $rc -eq 0 ] && ok "unwritable CLAUDE_PLUGIN_DATA -> exit 0" || bad "unwritable state" "rc=$rc"
+t_contains "unwritable CLAUDE_PLUGIN_DATA -> the primer is still produced" "$out" 'kernel plugin'
+# H1/H2 without jq on a real Kernel project
+t_contains "H1 primer with jq absent (sed fallback)" "$(payload "$F/payloads/SessionStart.startup.json" "$KPROJ" "$(newsid)" | KP_NO_JQ=1 "$KP_SH" "$P/hooks/context.sh" session 2>/dev/null)" 'detected: @onkernel/sdk'
+t_contains "H2 primer with jq absent (sed fallback)" "$(payload "$F/payloads/SubagentStart.json" "$KPROJ" "$(newsid)" | KP_NO_JQ=1 "$KP_SH" "$P/hooks/context.sh" subagent 2>/dev/null)" 'kernel plugin'
+# MultiEdit and Edit-with-a-key shapes (no captured payload exists for MultiEdit; built by hand from the documented shape)
+ME="{\"session_id\":\"$(newsid)\",\"cwd\":\"$G1\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"MultiEdit\",\"tool_input\":{\"file_path\":\"$G1/src/config.ts\",\"edits\":[{\"old_string\":\"a\",\"new_string\":\"b\"},{\"old_string\":\"c\",\"new_string\":\"const k = '$KEY'\"}]}}"
+t_contains "H4 MultiEdit with a key in the second edit -> deny" "$(printf '%s' "$ME" | run_hook secret-guard.sh)" '"permissionDecision":"deny"'
+EN="$(payload "$F/payloads/PreToolUse.Edit.json" "$G1" "$(newsid)" | sed "s#\"new_string\":\"[^\"]*\"#\"new_string\":\"const k = '$KEY'\"#")"
+t_contains "H4 Edit with a key in new_string -> deny" "$(printf '%s' "$EN" | run_hook secret-guard.sh)" '"permissionDecision":"deny"'
+MH="{\"session_id\":\"$(newsid)\",\"cwd\":\"$H3P\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"MultiEdit\",\"tool_input\":{\"file_path\":\"$FILE\",\"edits\":[{\"old_string\":\"a\",\"new_string\":\"const o = { disable_default_proxy: true };\"}]},\"tool_response\":{}}"
+t_contains "H3 MultiEdit adding disable_default_proxy -> finding K001" "$(printf '%s' "$MH" | run_hook edit-tripwire.sh)" ' K001 '
 
 # ---------------------------------------------------------------- timing
 echo "--- timing"

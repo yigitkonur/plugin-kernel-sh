@@ -78,7 +78,7 @@ try {
 - Treating `fill` as isolation. Page scripts, extensions and an agent with CDP access can read the filled values. Your controller (not the model) must authorize `page_url` and selectors before every fill: a credential item has no destination allowlist.
 - `sensitive: false` for anything secret. Verified live: a non-sensitive field's value comes back in `get` and `list`; sensitive fields show only `has_value: true`. Passwords and TOTP fields must be sensitive.
 - Logging the `action.url` (collection link, 30 minute bearer link) or the filled values. Show the link only in the user's authenticated UI.
-- Reading back the password field to "verify". If you must, report its length only (done live).
+- Reading back the password field to "verify". If you must, report its length only (not in the ledger).
 - Putting a vault on a pool: pool create has no vault parameter (`references/does-not-exist.md`).
 - Vault count is capped per org (SDK doc comment: 3 on the free tier). Check `max_vaults` in `kernel org limits get -o json` before one vault per user at scale; delete item then vault when done (done live).
 
@@ -107,7 +107,7 @@ try { /* performOperation(...) */ } catch (e) {
 
 - **If** your secrets live in another manager (AWS, Vault, etc.) **Do** read them in your trusted backend and pass them as `value` at `upsert`. This stores an encrypted copy in Kernel; it is not a live link, so update the item when the source changes and delete it when retention ends. Source https://www.kernel.sh/docs/vaults/existing-credential-vault (not run live).
 - **If** a value changes **Do** `items.update(key, { id_or_name, type: 'credential', version, expected_item_id, spec: { fields: { password: { value } } } })`. A stale `version` returns 409: reload, do not resubmit blindly. Source https://www.kernel.sh/docs/vaults/credentials (not run live).
-- Field names, types and sensitivity are immutable: use a new item key for a different shape. A vault `totp` field always makes SHA1, 6-digit, 30 s codes; a different algorithm, digits or period needs a Managed Auth credential.
+- A field's name, type and sensitivity cannot be edited in place. The SDK `update` takes `add_fields` and `remove_fields`: to change a field, remove it and add it again in the same update (the old value is deleted), or use a new item key for a different shape. A vault `totp` field always makes SHA1, 6-digit, 30 s codes; a different algorithm, digits or period needs a Managed Auth credential.
 
 ## 1Password (preview)
 
@@ -144,8 +144,8 @@ Keep the vault id, card key, browser id and last event id until reconciled. **So
 
 | Need | Provider | Notes |
 |---|---|---|
-| Pay with the user's Link wallet, a fresh approved credential per purchase | `link` | US phone number users only; live only; amount 1..500000 minor units, virtual card at most 50000 |
-| Pay with the user's real card, reusable, Face ID approval per checkout | `agentcard` | Needs a recognized processor request (Stripe, Shopify, Square, Recurly, Razorpay, Braintree, Worldpay, Bambora, Mercado Pago); check mode (`test_mode`) against your `AGENTCARD_MODE` and stop on mismatch |
+| Pay with the user's Link wallet, a fresh approved credential per purchase | `link` | US phone number users only; live only; the SDK type says the amount is at most 50000 minor units (the docs page has been seen with a larger figure: check the SDK types before relying on a limit; payments are untested) |
+| Pay with the user's real card, reusable, Face ID approval per checkout | `agentcard` | Needs a recognized processor request (Stripe, Shopify, Square, Recurly, Razorpay, Braintree, Worldpay, Bambora, Mercado Pago, and Adyen, which takes public dummy card fields and no vault aliases per the SDK doc); check mode (`test_mode`) against your `AGENTCARD_MODE` and stop on mismatch |
 
 Choose by the lifecycle, not the merchant processor; only AgentCard's alias handoff depends on processor coverage.
 
@@ -174,7 +174,7 @@ Authorize errors that leave the card `requested` and safe to authorize again: `p
 1. Create the agentcard card item from the verified purchase (`card_id` pins an enrolled card), wait for `ready`, read `state.aliases` (`number`, `cvc`, `exp_month`, `exp_year`) just before use.
 2. **Start the observer before the agent submits**: loop `items.retrieve(key, { id_or_name, wait: 5 })` and `items.events(key, { id_or_name, after, wait: 5 })`; when `action.url` appears, show it to the user through your controller. Events return an ordered array; an empty array means nothing new, not failure; keep the last event `id` as `after`.
 3. Keep the aliases (`number`, `cvc`, expiry) in the trusted controller; never hand them to the agent or model as task input or tool output. Inject them into the checkout fields from page-driving controller code (for example your own Playwright or CDP code selecting the card inputs) that does not return the values to the agent (untested: no payment was run). The agent only drives navigation and the submit. Let the merchant page's own submit create the request; Kernel holds the recognized request while the user approves, agentcard executes it, Kernel replays the response.
-4. Where the processor row requires it (Square on the current deployment, Braintree, Worldpay, Bambora, Mercado Pago), invoke `prepare_checkout` before submitting; an unprepared request is rejected.
+4. Where the processor row requires it (Square on the current deployment, Braintree, Worldpay, Bambora, Mercado Pago, Adyen), invoke `prepare_checkout` before submitting; an unprepared request is rejected.
 5. Keep the observer running until the merchant reaches a terminal order state or your deadline; if the deadline passes, classify the attempt indeterminate and do not submit again.
 
 **Avoid** invoking `authorize` (AgentCard does not advertise it), raw processor API calls instead of the page's own submission, caching aliases across expiry or state changes, and reading `ready` after the attempt as success: a declined or expired attempt can return the reusable card to `ready`. **Source** https://www.kernel.sh/docs/integrations/wallets/agentcard
@@ -191,7 +191,7 @@ Authorize errors that leave the card `requested` and safe to authorize again: `p
 | If | Do | Avoid | Source |
 |---|---|---|---|
 | You need your own OAuth client for Link or AgentCard | Create a provider config (`kernel vault-provider-configs`, SDK `vaultProviderConfigs`) with an **org-scoped** key; pick exactly one config `id` or `name` per wallet | Project-scoped key (403); changing a bound config (immutable; new config means new wallets); deleting one still referenced (409). Default to Kernel-managed credentials | https://www.kernel.sh/docs/integrations/wallets/overview |
-| Kernel-managed Visa cards (`provider: 'kernel'`) | CLI or MCP only today: wallet enroll, purchase request, then report with `confirm_transaction`, recover with `restart_verification` | Assuming the docs' Link/AgentCard checkout flow applies (the SDK types include a `kernel` card state, but no flow was run or documented beyond the changelog) | https://www.kernel.sh/docs/changelog (October 16) |
+| Kernel-managed Visa cards (`provider: 'kernel'`) | Wallet enroll, purchase request, then report with `confirm_transaction`, recover with `restart_verification` (CLI and MCP; the SDK types also have the `kernel` card and wallet item specs and these two params; no flow was run) | Assuming the docs' Link/AgentCard checkout flow applies (nothing is documented beyond the changelog) | https://www.kernel.sh/docs/changelog (October 16) |
 | The agent should buy a Kernel browser with no account | MPP: `curl -i -X POST https://api.onkernel.com/mpp/browsers` shows the `402` offer (docs only, not run); pay with Stripe's `link-cli mpp pay`; on a lost response retry with the **same** payment credential | Treating MPP as a merchant checkout (it buys browser access only, no vault); a second payment to recover an uncertain purchase; logging the returned `cdp_ws_url` | https://www.kernel.sh/docs/info/mpp |
 
 ## Operating notes
@@ -204,6 +204,6 @@ Authorize errors that leave the card `requested` and safe to authorize again: `p
 
 ## Contradictions to know
 
-- Docs say known execution failures can return HTTP 200 with `failed` or `unknown`; they do not describe pre-write validation errors. Verified live: pre-write validation failures (`page_not_found`, `element_not_found`, `timeout`) are HTTP 400 with `{ code, message }` and nothing is written. Branch on both.
+- Known execution failures can return HTTP 200 with `failed` or `unknown`; validation errors before any write are 400/403/404/409 and nothing is written (the SDK `performOperation` doc comment says both). Verified live: `page_not_found`, `element_not_found` and `timeout` came back as HTTP 400 with `{ code, message }`. The 403, 404 and 409 cases are docs-only. Branch on both.
 
 Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
