@@ -29,7 +29,7 @@ Env vars the SDK reads (grep of installed 0.128.0): `KERNEL_API_KEY`, `KERNEL_BA
 
 **If** a call is safe to repeat (list, retrieve, delete by id) -> **Do** keep the defaults. -> **Avoid** hand-rolled 429 loops on top of them.
 
-**If** a call has side effects (browser create, app invoke, deploy, playwright `execute`, REPL/code run, payments, search, auth `connections.create` / `login`, vault `performOperation`, pool `acquire`, profile writes) -> **Do** pass per-request options: `{ maxRetries: 0, timeout: <operation timeout + margin> }`. -> **Avoid** default retries there: a timed-out or 5xx request can already have run on the server, and the retry runs it again.
+**If** a call has side effects (browser create, app invoke, deploy, playwright `execute`, REPL/code run, payments, search, auth `connections.create` / `login`, vault `performOperation`, pool `acquire`, profile writes, WebMCP `invokeTool`, computer actions such as `clickMouse` / `typeText` / `pressKey`, `process.exec` / `spawn`, and `fs` writes) -> **Do** pass per-request options: `{ maxRetries: 0, timeout: <operation timeout + margin> }`. -> **Avoid** default retries there: a timed-out or 5xx request can already have run on the server, and the retry runs it again.
 
 ```ts
 // untested (shape from SDK README "Retries" and "Timeouts")

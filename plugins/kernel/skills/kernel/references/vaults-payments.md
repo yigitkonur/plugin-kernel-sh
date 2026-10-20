@@ -22,8 +22,8 @@ Vault fill was verified live. **Payments were never run** (real money, real wall
 1. One vault per end user or access boundary: `kernel.vaults.upsert({ name })`. Attaching a vault gives the browser every item in it, including items added later.
 2. Create the item with `kernel.vaults.items.upsert(key, { id_or_name, type: 'credential', spec: { provider: 'kernel', description, fields } })`. Keep secrets `sensitive: true` (the default). With no `value` the item is `pending_collection` with an `action.url` the user opens; poll `items.retrieve(key, { id_or_name, wait: 60 })` until `ready`.
 3. Attach the vault when you create the browser: `browsers.create({ vaults: [{ id: vault.id }] })`. The binding is fixed for the browser's life. Up to 20 references; each takes `id` or `name` (attach by `name` was not run).
-4. Navigate so the page is open at exactly the URL you will pass as `page_url`, retrieve the item, require a `fill` entry in `available_operations` (an array of `{ type, description }` objects, not strings: match on `.type`), then call `performOperation` with `type: 'fill'`, `browser_id: browser.session_id` (the session id, not a name), `page_url` and `fields: [{ field, selector }]`. Pass `{ maxRetries: 0 }`.
-5. Submit the form yourself, then check the page for a logged-in signal.
+4. Navigate so the page is open at exactly the URL you will pass as `page_url`, retrieve the item, require a `fill` entry in `available_operations` (an array of `{ type, description }` objects, not strings: match on `.type`), then call `performOperation` with `type: 'fill'`, `browser_id: browser.session_id` (the session id, not a name), `page_url` and `fields: [{ field, selector }]`. Pass `{ maxRetries: 0, timeout: <ms> }`.
+5. Submit only if the operation `status` is `completed` and every requested field is `filled` (not `failed`, `unknown` or `not_attempted`); otherwise stop and look at the page. Then submit the form yourself and check the page for a logged-in signal.
 
 ```ts
 // untested as written: adapted from a live run (names changed, trimmed). `username` and `password` are never literals in code:
@@ -60,8 +60,12 @@ try {
       { field: 'username', selector: '#username' },
       { field: 'password', selector: '#password' },
     ],
-  }, { maxRetries: 0 });
+  }, { maxRetries: 0, timeout: 40_000 });
   // result: { type: 'fill', status: 'completed', fields: [{ index: 0, status: 'filled' }, ...] }
+  if (result.type !== 'fill' || result.status !== 'completed' || result.fields.length !== 2 || !result.fields.every((f) => f.status === 'filled')) {
+    throw new Error('fill not fully completed: do not submit');   // failed / unknown / not_attempted: look at the page first
+  }
+  // ... only now submit the form, then check the page for a logged-in signal ...
 } finally {
   await kernel.browsers.deleteByID(browser.session_id).catch((e) => {
     if (!(e instanceof Kernel.NotFoundError)) throw e;   // 404: the timeout already reaped it
@@ -169,7 +173,7 @@ Authorize errors that leave the card `requested` and safe to authorize again: `p
 **Do**
 1. Create the agentcard card item from the verified purchase (`card_id` pins an enrolled card), wait for `ready`, read `state.aliases` (`number`, `cvc`, `exp_month`, `exp_year`) just before use.
 2. **Start the observer before the agent submits**: loop `items.retrieve(key, { id_or_name, wait: 5 })` and `items.events(key, { id_or_name, after, wait: 5 })`; when `action.url` appears, show it to the user through your controller. Events return an ordered array; an empty array means nothing new, not failure; keep the last event `id` as `after`.
-3. Give the agent the aliases as structured task input. Let the merchant page's own submit create the request; Kernel holds the recognized request while the user approves, agentcard executes it, Kernel replays the response.
+3. Keep the aliases (`number`, `cvc`, expiry) in the trusted controller; never hand them to the agent or model as task input or tool output. Inject them into the checkout fields from page-driving controller code (for example your own Playwright or CDP code selecting the card inputs) that does not return the values to the agent (untested: no payment was run). The agent only drives navigation and the submit. Let the merchant page's own submit create the request; Kernel holds the recognized request while the user approves, agentcard executes it, Kernel replays the response.
 4. Where the processor row requires it (Square on the current deployment, Braintree, Worldpay, Bambora, Mercado Pago), invoke `prepare_checkout` before submitting; an unprepared request is rejected.
 5. Keep the observer running until the merchant reaches a terminal order state or your deadline; if the deadline passes, classify the attempt indeterminate and do not submit again.
 

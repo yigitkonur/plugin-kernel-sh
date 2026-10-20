@@ -97,13 +97,14 @@ kp_is_envfile() {
 # (gitignored, or outside any git repo). Existing ancestor dir is used for new files.
 kp_env_ok() {
   kp_is_envfile "$1" || return 1
-  _kp_dir="${1%/*}"; [ "$_kp_dir" = "$1" ] && _kp_dir="."
+  case "$1" in /*) _kp_abs="$1" ;; *) _kp_abs="$PWD/$1" ;; esac   # git -C changes directory: a relative path must not be resolved there
+  _kp_dir="${_kp_abs%/*}"
   while [ -n "$_kp_dir" ] && [ ! -d "$_kp_dir" ]; do
     case "$_kp_dir" in */*) _kp_dir="${_kp_dir%/*}" ;; *) _kp_dir="." ;; esac
     [ "$_kp_dir" = "" ] && _kp_dir="/"
   done
   git -C "$_kp_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
-  git -C "$_kp_dir" check-ignore -q -- "$1" 2>/dev/null
+  git -C "$_kp_dir" check-ignore -q -- "$_kp_abs" 2>/dev/null
 }
 
 # kp_tool_stream: prints 4 metadata lines (session_id, cwd, tool_name, file path) followed by the NEW text of the

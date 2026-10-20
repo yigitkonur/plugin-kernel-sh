@@ -65,9 +65,11 @@ kernel browsers computer screenshot <id> --to ./shot.png
 **If** you need a throwaway browser to try something -> **Do**:
 
 ```bash
-kernel browsers create -o json --headless -t 120 --name my-browser --tag run=example --start-url https://example.com -y
-# read session_id (never print cdp_ws_url, base_url or webdriver_ws_url)
-kernel browsers delete <id>
+out=$(kernel browsers create -o json --headless -t 120 --name my-browser --tag run=example --start-url https://example.com -y)
+id=$(printf '%s' "$out" | jq -r .session_id)   # keep only session_id; the other URLs are credentials
+printf '%s' "$out" | jq '{session_id}'          # never print cdp_ws_url, base_url or webdriver_ws_url
+# ... work with "$id" ...
+kernel browsers delete "$id"
 ```
 
 `-y` skips prompts (the pool-conflict confirm). Create flags worth knowing: `--stealth`, `--headless`, `--gpu`, `--kiosk`, `-t/--timeout` (seconds, default 60; the SDK field is `timeout_seconds`), `--start-url`, `--name`, `--tag K=V` (repeatable), `--profile-id|--profile-name` with `--save-changes`, `--proxy-id|--proxy-name|--proxy-mode`, `--region`, `--viewport`, `--pool-id|--pool-name`, `--telemetry`, `--extension`, `--vault`, `--allowed-host`. Output keys include `session_id`, `cdp_ws_url`, `base_url`, `webdriver_ws_url`, `name`, `tags`, `region`, `headless`, `stealth`, `timeout_seconds`. **Source** create verified live; https://github.com/onkernel/cli `cmd/browsers.go`.

@@ -1,7 +1,7 @@
 /*
  * Source: https://github.com/kernel/skills (plugins/kernel-cli/skills/profile-website-bot-detection/scripts/test-kernel-bot-detection.ts)
  * Copyright (c) 2025 Kernel. MIT License (https://opensource.org/license/mit).
- * Copied unchanged except for this header; see NOTICE.md in this directory.
+ * Modified from the original (privacy fixes and two analyzer fixes); see the Changes list in NOTICE.md in this directory.
  */
 
 /**
@@ -131,7 +131,7 @@ interface NetworkResponseEntry {
 
 interface CookieEntry {
   name: string;
-  value: string;
+  valueLength: number; // the value itself is never stored
   domain: string;
   vendorMatch: VendorProduct | null;
 }
@@ -151,8 +151,7 @@ interface ErrorEntry {
 
 interface KernelSessionInfo {
   sessionId: string;
-  cdpWsUrl: string;
-  liveViewUrl: string | undefined;
+  liveViewAvailable: boolean; // the CDP and live view URLs are credentials: never logged or stored
   stealth: boolean;
   headless: boolean;
   createdAt: string;
@@ -202,7 +201,42 @@ const collectedData: CollectedData = {
 /**
  * Log with timestamp and colors
  */
+/**
+ * Reduce a URL to origin + path (no query, fragment or credentials) before it is logged or stored.
+ */
+function safeUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    if (!['http:', 'https:', 'ws:', 'wss:'].includes(u.protocol)) return `${u.protocol}[omitted]`;
+    return `${u.origin}${u.pathname}`;
+  } catch {
+    return raw.split(/[?#]/)[0];
+  }
+}
+
+/**
+ * Replace every http(s)/ws(s) URL inside free text with its origin + path.
+ */
+function redactUrls(text: string): string {
+  return text.replace(/\b(?:https?|wss?):\/\/[^\s"'<>)]+/gi, (m) => safeUrl(m));
+}
+
+/**
+ * Header values that can carry credentials are replaced; header names and other values are kept.
+ */
+const SENSITIVE_HEADER = /^(cookie|set-cookie|authorization|proxy-authorization)$|token|secret|session|jwt|auth|csrf|xsrf|signature|api-?key|^x-kpsdk-|^x-datadome/i;
+const URL_HEADER = /^(referer|location|origin|content-location)$/i;
+
+function redactHeaders(headers: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    out[name] = SENSITIVE_HEADER.test(name) ? '[redacted]' : URL_HEADER.test(name) ? safeUrl(value) : value;
+  }
+  return out;
+}
+
 function log(message: string, level: 'INFO' | 'WARN' | 'ERROR' = 'INFO'): void {
+  message = redactUrls(message);
   const timestamp = new Date().toISOString();
   const colors = {
     INFO: '\x1b[36m',
@@ -589,7 +623,7 @@ const VENDOR_SIGNATURES: VendorSignature[] = [
 /**
  * Detect vendor and product from URL
  */
-function detectVendorFromUrl(url: string): VendorProduct | null {
+function detectVendorFromUrl(url: string, status?: number): VendorProduct | null {
   for (const vendor of VENDOR_SIGNATURES) {
     // Check vendor-level URL patterns
     const vendorMatch = vendor.urlPatterns.some((pattern) => pattern.test(url));
@@ -597,6 +631,8 @@ function detectVendorFromUrl(url: string): VendorProduct | null {
 
     // Check for specific product match
     for (const product of vendor.products) {
+      // A product with statusCodes (Kasada IPS) only matches a response with one of them
+      if (product.statusCodes && (status === undefined || !product.statusCodes.includes(status))) continue;
       if (product.urlPatterns?.some((pattern) => pattern.test(url))) {
         return {
           vendor: vendor.vendor,
@@ -612,7 +648,7 @@ function detectVendorFromUrl(url: string): VendorProduct | null {
       vendor: vendor.vendor,
       product: 'Unknown Product',
       confidence: 'medium',
-      evidence: [`URL matches vendor pattern: ${url}`],
+      evidence: [`URL matches vendor pattern: ${safeUrl(url)}`],
     };
   }
   return null;
@@ -892,7 +928,7 @@ async function collectAndAnalyzeCookies(page: Page): Promise<void> {
     const vendorMatch = detectVendorFromCookie(cookie.name, cookie.value);
     const entry: CookieEntry = {
       name: cookie.name,
-      value: cookie.value.substring(0, 100) + (cookie.value.length > 100 ? '...' : ''),
+      valueLength: cookie.value.length,
       domain: cookie.domain,
       vendorMatch,
     };
@@ -1148,14 +1184,14 @@ async function runTest(): Promise<void> {
   log('Bot Detection Vendor Analysis - Kernel Browser');
   log('='.repeat(60));
   log(`Browser ID: ${CONFIG.browserId}`);
-  log(`Target URL: ${CONFIG.targetUrl}`);
+  log(`Target URL: ${safeUrl(CONFIG.targetUrl)}`);
   log(`Timeout: ${CONFIG.timeout}ms`);
   log('='.repeat(60));
 
   collectedData.startTime = new Date().toISOString();
   collectedData.metadata = {
     browserId: CONFIG.browserId,
-    targetUrl: CONFIG.targetUrl,
+    targetUrl: safeUrl(CONFIG.targetUrl),
     timeout: CONFIG.timeout,
   };
 
@@ -1169,8 +1205,7 @@ async function runTest(): Promise<void> {
 
     const sessionInfo: KernelSessionInfo = {
       sessionId: session.session_id,
-      cdpWsUrl: session.cdp_ws_url,
-      liveViewUrl: session.browser_live_view_url,
+      liveViewAvailable: Boolean(session.browser_live_view_url),
       stealth: session.stealth,
       headless: session.headless,
       createdAt: session.created_at,
@@ -1180,9 +1215,7 @@ async function runTest(): Promise<void> {
     log(`Session found`);
     log(`  Stealth Mode: ${session.stealth}`);
     log(`  Headless: ${session.headless}`);
-    if (session.browser_live_view_url) {
-      log(`  Live View: ${session.browser_live_view_url}`);
-    }
+    log(`  Live View: ${session.browser_live_view_url ? 'available' : 'not available'}`);
 
     // Connect via CDP
     log('Connecting to browser via CDP...');
@@ -1215,16 +1248,16 @@ async function runTest(): Promise<void> {
       const entry: NetworkRequestEntry = {
         timestamp: new Date().toISOString(),
         method: request.method(),
-        url: url,
+        url: safeUrl(url),
         resourceType: request.resourceType(),
-        headers: headers,
+        headers: redactHeaders(headers),
         vendorMatch,
       };
       collectedData.networkRequests.push(entry);
 
       if (vendorMatch) {
-        updateVendorDetection(vendorMatch, 'url', url);
-        log(`[VENDOR] ${vendorMatch.vendor} - ${vendorMatch.product}: ${url.substring(0, 80)}...`, 'WARN');
+        updateVendorDetection(vendorMatch, 'url', safeUrl(url));
+        log(`[VENDOR] ${vendorMatch.vendor} - ${vendorMatch.product}: ${safeUrl(url).substring(0, 80)}...`, 'WARN');
       }
     });
 
@@ -1234,16 +1267,16 @@ async function runTest(): Promise<void> {
       const status = response.status();
       const headers = response.headers();
 
-      const vendorFromUrl = detectVendorFromUrl(url);
+      const vendorFromUrl = detectVendorFromUrl(url, status);
       const vendorFromHeaders = detectVendorFromHeaders(headers);
       const challengeInfo = detectChallengeType(url, status, headers);
       const vendorMatch = vendorFromUrl || vendorFromHeaders;
 
       const entry: NetworkResponseEntry = {
         timestamp: new Date().toISOString(),
-        url: url,
+        url: safeUrl(url),
         status: status,
-        headers: headers,
+        headers: redactHeaders(headers),
         vendorMatch,
       };
       collectedData.networkResponses.push(entry);
@@ -1255,19 +1288,21 @@ async function runTest(): Promise<void> {
         const context = vendorFromHeaders && !vendorFromUrl ? 'header' : 'url';
         const evidence = context === 'header'
           ? `Response header match for ${vendorMatch.vendor}`
-          : url;
+          : safeUrl(url);
         updateVendorDetection(vendorMatch, context, evidence);
-        log(`[VENDOR RESPONSE] ${vendorMatch.vendor} - ${vendorMatch.product}: ${url.substring(0, 80)}...`, 'WARN');
+        log(`[VENDOR RESPONSE] ${vendorMatch.vendor} - ${vendorMatch.product}: ${safeUrl(url).substring(0, 80)}...`, 'WARN');
       }
 
       if (challengeInfo) {
         log(`[CHALLENGE] ${challengeInfo.vendor} - ${challengeInfo.product} (Status: ${status})`, 'WARN');
-        // Ensure a vendorDetection entry exists before annotating it with challenge info.
-        if (!collectedData.vendorDetections.has(challengeInfo.vendor)) {
+        // Register the challenge product even when the vendor already has an entry (e.g. Cloudflare
+        // detected earlier from a cdn-cgi URL), then annotate the entry with challenge info.
+        const existingVendor = collectedData.vendorDetections.get(challengeInfo.vendor);
+        if (!existingVendor || !existingVendor.products.some((p) => p.product === challengeInfo.product)) {
           updateVendorDetection(
-            { vendor: challengeInfo.vendor, product: challengeInfo.product, confidence: 'high', evidence: [`Challenge detected at ${url} (status ${status})`] },
+            { vendor: challengeInfo.vendor, product: challengeInfo.product, confidence: 'high', evidence: [`Challenge detected at ${safeUrl(url)} (status ${status})`] },
             'url',
-            url,
+            safeUrl(url),
           );
         }
         const detection = collectedData.vendorDetections.get(challengeInfo.vendor)!;
@@ -1279,8 +1314,8 @@ async function runTest(): Promise<void> {
       // Track detected vendor scripts (not saved to disk)
       if (vendorMatch) {
         if (url.endsWith('.js') || headers['content-type']?.includes('javascript')) {
-          if (!collectedData.vendorScriptsDetected.includes(url)) {
-            collectedData.vendorScriptsDetected.push(url);
+          if (!collectedData.vendorScriptsDetected.includes(safeUrl(url))) {
+            collectedData.vendorScriptsDetected.push(safeUrl(url));
           }
         }
       }
@@ -1291,8 +1326,8 @@ async function runTest(): Promise<void> {
       const entry: ConsoleEntry = {
         timestamp: new Date().toISOString(),
         type: msg.type(),
-        text: msg.text(),
-        location: msg.location(),
+        text: redactUrls(msg.text()),
+        location: { ...msg.location(), url: safeUrl(msg.location().url) },
       };
       collectedData.consoleMessages.push(entry);
 
@@ -1306,8 +1341,8 @@ async function runTest(): Promise<void> {
     page.on('pageerror', (error: Error) => {
       const entry: ErrorEntry = {
         timestamp: new Date().toISOString(),
-        message: error.message,
-        stack: error.stack,
+        message: redactUrls(error.message),
+        stack: error.stack === undefined ? undefined : redactUrls(error.stack),
       };
       collectedData.errors.push(entry);
       log(`[PAGE ERROR] ${error.message}`, 'ERROR');
@@ -1362,7 +1397,7 @@ async function runTest(): Promise<void> {
     const loginUrl = await findLoginPage(page, CONFIG.targetUrl);
     
     if (loginUrl) {
-      log(`Found login page: ${loginUrl}`);
+      log(`Found login page: ${safeUrl(loginUrl)}`);
       try {
         await page.goto(loginUrl, {
           waitUntil: 'networkidle',
@@ -1663,7 +1698,7 @@ async function runTest(): Promise<void> {
     log('='.repeat(60));
   } catch (error) {
     log(`Test failed: ${(error as Error).message}`, 'ERROR');
-    console.error(error);
+    console.error(redactUrls(String((error as Error).stack ?? error)));
     process.exit(1);
   }
 }
@@ -1673,7 +1708,7 @@ async function runTest(): Promise<void> {
 runTest().then(
   () => process.exit(0),
   (error) => {
-    console.error(error);
+    console.error(redactUrls(String((error as Error)?.stack ?? error)));
     process.exit(1);
   },
 );

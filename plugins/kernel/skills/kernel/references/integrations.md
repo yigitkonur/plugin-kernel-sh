@@ -99,22 +99,30 @@ v4 runs as a Chrome extension, so a remote browser needs the extension on **its*
 ```ts
 // untested (needs a model key); adapted from the docs page (the docs wrap the upload in a `loadStagehandExtension(kernel, sessionId)` helper; `STAGEHAND_EXTENSION_DIR`, `STAGEHAND_EXTENSION_ZIP` and `kernel` are assumed defined)
 import { Stagehand, localBrowser } from '@browserbasehq/stagehand';
+const ignoreNotFound = (e: unknown) => { if (!(e instanceof Kernel.NotFoundError)) throw e; };
 const kb = await kernel.browsers.create(
   { stealth: true, timeout_seconds: 300 },
   { maxRetries: 0, timeout: 30_000 }, // a retried create can duplicate
 );
-await kernel.browsers.fs.uploadZip(kb.session_id, {
-  dest_path: STAGEHAND_EXTENSION_DIR,          // <stagehand dist>/extension
-  zip_file: createReadStream(STAGEHAND_EXTENSION_ZIP), // <stagehand dist>/assets/stagehand-extension.zip
-});
-const browser = await localBrowser.connect({ cdpUrl: kb.cdp_ws_url });
-const stagehand = await Stagehand.create({
-  browser,
-  model: { modelName: '<provider>/<model>', apiKey: process.env.MODEL_API_KEY },
-});
-// v4: await browser.context.activePage(); extract() returns { data }
-// cleanup, nested so a failed close never skips the delete:
-// try { await stagehand.close() } finally { try { await browser.close() } finally { await kernel.browsers.deleteByID(kb.session_id).catch(ignoreNotFound) } }
+let browser: Awaited<ReturnType<typeof localBrowser.connect>> | undefined;
+let stagehand: Awaited<ReturnType<typeof Stagehand.create>> | undefined;
+try {
+  await kernel.browsers.fs.uploadZip(kb.session_id, {
+    dest_path: STAGEHAND_EXTENSION_DIR,          // <stagehand dist>/extension
+    zip_file: createReadStream(STAGEHAND_EXTENSION_ZIP), // <stagehand dist>/assets/stagehand-extension.zip
+  }, { maxRetries: 0, timeout: 60_000 });
+  browser = await localBrowser.connect({ cdpUrl: kb.cdp_ws_url });
+  stagehand = await Stagehand.create({
+    browser,
+    model: { modelName: '<provider>/<model>', apiKey: process.env.MODEL_API_KEY },
+  });
+  // v4: await browser.context.activePage(); extract() returns { data }
+} finally {
+  // nested so a failed close never skips the delete
+  try { await stagehand?.close(); } finally {
+    try { await browser?.close(); } finally { await kernel.browsers.deleteByID(kb.session_id).catch(ignoreNotFound); }
+  }
+}
 ```
 
 - v3 differs (labelled v3 only): it takes `env: 'LOCAL'` and `localBrowserLaunchOptions: { cdpUrl }`, uses `stagehand.context.pages()[0]`, and `extract` returns the object directly.
@@ -157,7 +165,7 @@ spawnSync('npx', ['--yes', 'agent-browser', 'close'], { env, encoding: 'utf8' })
 - The docs page gives defaults of headless false and stealth true; a community skill (agent-browser 0.33.0) says headless true and stealth false. The defaults were not tested, so do not rely on either; set `KERNEL_HEADLESS`, `KERNEL_STEALTH` and `KERNEL_TIMEOUT_SECONDS` yourself.
 - It creates browsers with no tags: `kernel browsers list --tag ...` cannot find them. Track them by time or close via `agent-browser close`.
 - Use headful (`KERNEL_HEADLESS=false`) when a human needs live view.
-- `KERNEL_PROFILE_NAME` and the `-p kernel` flag form were not tested (an older community skill says the profile variable failed in 0.33.0; unverified for 0.39.1). To keep state, create the browser with the SDK (profiles: `references/profiles.md`) and attach: `agent-browser connect "$CDP_URL"` (docs, untested), then `agent-browser close` and `kernel browsers delete <id>`.
+- `KERNEL_PROFILE_NAME` and the `-p kernel` flag form were not tested (an older community skill says the profile variable failed in 0.33.0; unverified for 0.39.1). Attaching `agent-browser` to a profile-backed SDK browser is not offered: the only documented form passes the CDP URL (a credential) as a CLI argument, and no safe variant was verified. For persisted state use the SDK paths in `references/profiles.md`.
 
 **Avoid** forgetting `close` (the Kernel browser lives until its timeout) and putting the CDP URL in a command line or log (it is a credential). **Source** verified live (env path); https://www.kernel.sh/docs/integrations/vercel/agent-browser.
 
@@ -175,6 +183,6 @@ spawnSync('npx', ['--yes', 'agent-browser', 'close'], { env, encoding: 'utf8' })
 
 - Whatever the framework, give the browser a `timeout_seconds`, tag it with a run id, and delete it in `finally`. Frameworks that "launch" browsers do not own a Kernel browser they did not create, and agent loops that crash skip cleanup.
 - Keep the Kernel key out of framework configs; `new Kernel()` reads `KERNEL_API_KEY`. Model keys belong in the environment, not in code.
-- Hand a framework `cdp_ws_url` only in-process; never print it or pass it as a CLI argument you log.
+- Hand a framework `cdp_ws_url` only in-process; never print it, log it or pass it as a CLI argument.
 
 Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

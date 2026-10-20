@@ -178,24 +178,31 @@ Captcha events (verified live, `stealth: true` + captcha telemetry, which is in 
 ```ts
 import { writeFileSync } from 'node:fs';
 
-const replay = await kernel.browsers.replays.start(id);
-// ...drive the page...
-// order matters: stop, wait for finished_at, download, and only then delete the browser
-await kernel.browsers.replays.stop(replay.replay_id, { id_or_name: id });
-for (let i = 0; i < 60; i++) {
-  const hit = (await kernel.browsers.replays.list(id)).find((r) => r.replay_id === replay.replay_id);
-  if (hit?.finished_at != null) break;
-  await new Promise((r) => setTimeout(r, 1000));
+const ignoreNotFound = (e: unknown) => { if (!(e instanceof Kernel.NotFoundError)) throw e; };
+const opts = { maxRetries: 0, timeout: 30_000 };
+const replay = await kernel.browsers.replays.start(id, {}, opts);
+try {
+  // ...drive the page...
+  // order matters: stop, wait for finished_at, download, and only then delete the browser
+  await kernel.browsers.replays.stop(replay.replay_id, { id_or_name: id }, opts);
+  for (let i = 0; i < 60; i++) {
+    const hit = (await kernel.browsers.replays.list(id)).find((r) => r.replay_id === replay.replay_id);
+    if (hit?.finished_at != null) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  const dl = () => kernel.browsers.replays.download(replay.replay_id, { id_or_name: id }).asResponse();
+  let res = await dl();
+  for (let i = 0; res.status === 202 && i < 30; i++) { // still finalizing: wait Retry-After, bounded
+    await new Promise((r) => setTimeout(r, Number(res.headers.get('retry-after') ?? '2') * 1000));
+    res = await dl();
+  }
+  if (!res.ok) throw new Error(`replay download failed: HTTP ${res.status}`);
+  writeFileSync('replay.mp4', Buffer.from(await res.arrayBuffer()));
+} finally {
+  // stop (ignored if already stopped or gone), then delete: last, after the file is on disk
+  await kernel.browsers.replays.stop(replay.replay_id, { id_or_name: id }, opts).catch(() => {});
+  await kernel.browsers.deleteByID(id).catch(ignoreNotFound);
 }
-const dl = () => kernel.browsers.replays.download(replay.replay_id, { id_or_name: id }).asResponse();
-let res = await dl();
-for (let i = 0; res.status === 202 && i < 30; i++) { // still finalizing: wait Retry-After, bounded
-  await new Promise((r) => setTimeout(r, Number(res.headers.get('retry-after') ?? '2') * 1000));
-  res = await dl();
-}
-if (!res.ok) throw new Error(`replay download failed: HTTP ${res.status}`);
-writeFileSync('replay.mp4', Buffer.from(await res.arrayBuffer()));
-await kernel.browsers.deleteByID(id); // last, after the file is on disk
 ```
 
 After the browser is deleted, a replay that was stopped first can still be listed (`finished_at` set) and downloaded (200, video/mp4; verified live). Stop it before you delete; the snippet downloads first so you do not depend on this. The download snippet's status, polling and `Buffer` read were verified live (200, video/mp4, about 272 KB for 10 s, video only, no audio); the whole create, replay and write-file flow ran again as written (200 on the first try). The 202 retry loop has never run, because no download returned 202. CLI (from the docs, untested): `kernel browsers replays start|stop|list|download`. Managed auth logins can record too (https://www.kernel.sh/docs/auth/configuration#record-sessions-for-debugging). Source: https://www.kernel.sh/docs/browsers/replays.

@@ -70,7 +70,7 @@ Never print the session id. Responses are SSE: parse the `data: ` line.
 | Make, list, inspect, delete a browser | `manage_browsers` `action: create\|update\|list\|get\|get_telemetry\|delete`; `remote_forward` (`remoteport:host:localport`) exposes a local dev server to the browser | Calling `delete` without `session_id`; trusting the docs action list (it omits `update` and `get_telemetry`; the live schema has all six) | https://www.kernel.sh/docs/reference/mcp-server/tools/manage-browsers |
 | One-off page check | `execute_playwright_code` `{ session_id, code }`; `return` the value you need. Verified live: `page.goto('https://example.com'); return await page.title()` worked | Expecting it to create or delete the browser (`session_id` is required) | verified live |
 | Screenshot | `computer_action` with `screenshot` | `page.screenshot()` inside the code (docs prefer `computer_action`) | https://www.kernel.sh/docs/reference/mcp-server/tools/execute-playwright-code |
-| Record video | `manage_replays` `action: start\|stop\|list` | Using a headless browser (docs: needs headful); assuming your plan allows it (paid plan: unverified; start/stop not called live) | https://www.kernel.sh/docs/reference/mcp-server/tools/manage-replays |
+| Record video | `manage_replays` `action: start\|stop\|list` | Using a headless browser (docs: needs headful; leave `headless` unset); assuming your plan allows it (paid plan: unverified; start/stop not called live) | https://www.kernel.sh/docs/reference/mcp-server/tools/manage-replays |
 | Pull files out of a browser | `manage_browser_files`; schema: `max_bytes` default 10 MiB, maximum 25 MiB | Assuming read/download works (not exercised) | the tool schema |
 | Apps | `manage_apps` | | `references/apps.md` |
 
@@ -80,10 +80,10 @@ Never print the session id. Responses are SSE: parse the `data: ` line.
 
 ## M7. Create, use, delete: leave nothing behind
 
-**If** you create a browser through MCP -> **Do** pass `headless: true`, a small `timeout_seconds`, and `tags` (for example `{ purpose: "check" }`), and delete it with `manage_browsers delete` when done. Verify with `kernel browsers list --status active -o json`. -> **Avoid** relying on a parse of the create response to get the ID in a script, and relying on the timeout to clean up. -> **Source** verified live
+**If** you create a browser through MCP -> **Do** pass a small `timeout_seconds` and a unique per-run tag (for example `{ run: "check-<random id>" }`, never a shared tag), set `headless: true` only for an unwatched check and leave `headless` unset when you need a replay or live view, and delete it with `manage_browsers delete` when done. Verify with `kernel browsers list --status active -o json`. -> **Avoid** relying on a parse of the create response to get the ID in a script, and relying on the timeout to clean up. -> **Source** verified live
 
 - Verified live: create (headless, `timeout_seconds: 60`, tags) -> 200; it appeared in `kernel browsers list --status active --tag <key>=<value> -o json` while alive; MCP `delete` replied "browser session deleted successfully"; the list was then `[]`.
-- Trap seen live: a client-side redaction of the create response (it masked a URL and swallowed an escaped quote) broke `JSON.parse`, no ID was saved, and the browser survived several minutes past its 60 s timeout until deleted by ID from `kernel browsers list`. If you lose the ID, list by tag and delete by ID.
+- Trap seen live: a client-side redaction of the create response (it masked a URL and swallowed an escaped quote) broke `JSON.parse`, no ID was saved, and the browser survived several minutes past its 60 s timeout until deleted by ID from `kernel browsers list`. If you lose the ID, list by your unique run tag and, for each candidate, confirm its tags hold this run's id (and that it was created after this run started) before deleting it by ID; never delete what a shared or generic tag matches, since it may be another worker's live browser.
 - The create response contains the CDP URL and live view URL: these are credentials. Never print, log or paste them.
 
 ## M8. Inputs: use the nested forms

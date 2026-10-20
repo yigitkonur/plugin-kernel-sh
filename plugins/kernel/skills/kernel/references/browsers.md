@@ -13,15 +13,17 @@ Read this before you write `kernel.browsers.create(...)`. Every choice below is 
 import Kernel from '@onkernel/sdk';
 
 const kernel = new Kernel();
-const browser = await kernel.browsers.create({
-  headless: true,
-  timeout_seconds: 60,
-  tags: { run: 'example' },
-});
+const browser = await kernel.browsers.create(
+  { headless: true, timeout_seconds: 60, tags: { run: 'example' } },
+  { maxRetries: 0, timeout: 30_000 }, // a retried create can duplicate the browser
+);
 try {
-  // ... use browser.session_id / browser.cdp_ws_url
+  // ... use browser.session_id (cdp_ws_url is a credential: never print or log it)
 } finally {
-  await kernel.browsers.deleteByID(browser.session_id);
+  // the timeout may have reaped it already: ignore only NotFoundError
+  await kernel.browsers.deleteByID(browser.session_id).catch((e) => {
+    if (!(e instanceof Kernel.NotFoundError)) throw e;
+  });
 }
 ```
 

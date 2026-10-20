@@ -48,7 +48,8 @@ Fetch the record and keep only safe fields before anything touches disk. Put the
 set -o pipefail
 kernel browsers get <ARG> --include-deleted -o json \
   | jq '{session_id,name,created_at,deleted_at,timeout_seconds,headless,stealth,proxy,tags,usage_status,telemetry}' > <D>/browser.json
-jq '. + {ran_s:(if .deleted_at then ((.deleted_at|sub("\\.[0-9]+";"")|fromdate)-(.created_at|sub("\\.[0-9]+";"")|fromdate)) else null end),
+jq '. + {running:(.deleted_at == null),
+     ran_s:((if .deleted_at then (.deleted_at|sub("\\.[0-9]+";"")|fromdate) else now|floor end)-(.created_at|sub("\\.[0-9]+";"")|fromdate)),
      telemetry_on:([.telemetry.browser//{}|to_entries[]|select(.value.enabled)|.key])} | del(.telemetry)' <D>/browser.json
 ```
 
@@ -57,6 +58,7 @@ Read `session_id` from the record. From here on, use that literal id as `<SESSIO
 Read the result:
 - `deleted_at` present: the browser is gone. Skip step 4 (live checks). The record has `deleted_at`, not a `status` key.
 - Exit 1 with `Not_found` even with `--include-deleted`: the id is wrong, belongs to another project (retry with `--project <name>`), or the name does not resolve (not verified whether `--include-deleted` accepts a name; prefer the id). Run the cleanup, then stop and ask.
+- `running: true` (no `deleted_at`): `ran_s` is the elapsed time so far (now minus `created_at`), so the timeout checks below still apply: `ran_s` at or past `timeout_seconds` on a still-active record means it is about to be, or is being, reaped.
 - `ran_s` close to `timeout_seconds`: the browser was most likely reaped by its timeout, not crashed. The timeout countdown starts after the browser enters standby, which happens after about 5 s with no activity, so also compare with the time of the last `cdp_disconnect` in step 3. Fix: raise `timeout_seconds` at create (../kernel/references/browsers.md).
 - `headless: true`: no live view URL and no replays exist for this session.
 - `telemetry_on` lacks `console`, `network` or `page`: capture was off for those categories; there is no evidence to recover, and enabling later cannot backfill. Defaults (`connection`, `control`, `system`, `captcha`) always layer on, so you will still see CDP connects and API calls.
@@ -159,7 +161,7 @@ If you get a non-200, wait and retry once. The replay is video only. Report the 
 Report to the user in exactly this shape:
 
 ```
-Session: <id> (<name>) - <live | deleted at <deleted_at>> - <headless | headful> - ran <ran_s>s of <timeout_seconds>s
+Session: <id> (<name>) - <live | deleted at <deleted_at>> - <headless | headful> - ran <ran_s>s of <timeout_seconds>s (so far, if live)
 Telemetry captured: <categories> | events read: <count> | window: <created_at> to now
 
 Likely cause: <one sentence>

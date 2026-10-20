@@ -27,7 +27,7 @@ Stored secrets stay out of API responses and model context, but not out of the p
 ```ts
 import Kernel from '@onkernel/sdk';
 
-const kernel = new Kernel();
+const kernel = new Kernel({ logLevel: 'warn' }); // the SDK logs request bodies at debug; the credential body holds the password
 const ONCE = { maxRetries: 0, timeout: 30_000 } as const;   // create and login are side-effecting: never auto-retry
 
 // 1. Store the credential first for any unattended run (without it the flow needs a person). From a shell, use the login skill's script.
@@ -70,7 +70,7 @@ try {
 }
 ```
 
-Verified live (trimmed). Worth acting on:
+Verified live, trimmed:
 - With a stored credential, `login` then `follow` reached `AUTHENTICATED` with no human; a browser on the profile opened the protected page logged in, without the profile it redirected to login. A new connection starts `NEEDS_AUTH`, `can_reauth: false` (reason `no_prior_successful_login`) until one login succeeds.
 - `follow` heartbeats arrive as event `sse_heartbeat`; filter on `ev.event === 'managed_auth_state'` and ignore the rest. The stream ends when the flow succeeds, fails, expires or is canceled; a hosted session expires after 20 minutes.
 - With no stored credential the flow sits at `AWAITING_INPUT` and ends `FAILED`, `error_code: awaiting_input_timeout`, after 10 minutes if nobody types on the hosted page (seen twice). Poll up to about 11 minutes, then stop and report: the fix is a stored credential or a person.
@@ -82,19 +82,19 @@ CLI equivalents exist for every step: `kernel auth connections create|get|update
 ## Scripted login once, reuse the profile
 
 **If** a dev script of yours logs in with a password itself (no Managed Auth), for a throwaway or demo account the user handed you, and later runs should reuse the session. Throwaway/demo accounts only: for a real account use Managed Auth with a stored credential, or vault fill.
-**Do** read the password from the environment at run time and put it into the `playwright.execute` code string with `JSON.stringify` (`execute` takes only `code`, `executor` and `timeout_sec`, so it travels in the request body); never log that string and never commit it. Log in only when the protected page redirects to login; open the browser with `save_changes: true` as the one writer for the profile; `deleteByID` in `finally`.
-**Avoid** a hard-coded password; a command-line argument or an inline `SECRET=... node` prefix (shell history); a second writer on the same profile. A password pasted in chat is already in the transcript: keep it out of files, shell history and later commands.
+**Do** read the password from the environment at run time and put it into the `playwright.execute` code string with `JSON.stringify` (`execute` takes only `code`, `executor` and `timeout_sec`, so it travels in the request body); never log that string and never commit it. Log in only when the protected page redirects to login; open the browser with `save_changes: true` as the profile's one writer; `deleteByID` in `finally`.
+**Avoid** a hard-coded password; `KERNEL_LOG=debug` or `logLevel: 'debug'` (logs the body, password included); a command-line argument or an inline `SECRET=... node` prefix (shell history); a second writer on the same profile. A password pasted in chat is already in the transcript: keep it out of files, shell history and later commands.
 **Source** verified live (ran twice: login performed, then `wasLoggedIn: true`); `references/profiles.md`.
 
 ```ts
 import Kernel, { ConflictError } from '@onkernel/sdk';
 
-const kernel = new Kernel();
+const kernel = new Kernel({ logLevel: 'warn' }); // debug logging would print the password in the execute body
 const PROFILE = 'acme-script-login';
 const { SITE_USER, SITE_PASSWORD } = process.env;
 if (!SITE_USER || !SITE_PASSWORD) throw new Error('SITE_USER and SITE_PASSWORD must be set');
 
-// Runs inside the Kernel VM; the secret is JSON-quoted in at runtime and travels in the request body.
+// Runs in the Kernel VM; the secret is JSON-quoted in at runtime and travels in the request body.
 const code = `
 await page.goto('https://example.com/account', { waitUntil: 'domcontentloaded' });
 const wasLoggedIn = new URL(page.url()).pathname === '/account';
@@ -143,7 +143,7 @@ Verified live: a second `login` while the first flow was live did not error. It 
 **Avoid** trusting `connection.status` alone: it reflects the last completed health check, and the site session can expire after it.
 **Source** https://www.kernel.sh/docs/auth/connection-lifecycle, https://www.kernel.sh/docs/auth/faq.
 
-Pattern (untested; docs): `await kernel.auth.connections.login(id)`, then `for await (const ev of await kernel.auth.connections.follow(id))` over `managed_auth_state` events: return on `flow_status === 'SUCCESS'`, throw "user action required" on `flow_step` `AWAITING_INPUT` or `AWAITING_EXTERNAL_ACTION`, and throw if the stream ends without `SUCCESS`. With a previous successful login and a saved check URL, `login` first verifies the profile and reaches `SUCCESS` without typing (docs; unverified).
+Untested pattern: `await kernel.auth.connections.login(id)`, then `for await (const ev of await kernel.auth.connections.follow(id))` over `managed_auth_state` events: return on `flow_status === 'SUCCESS'`, throw "user action required" on `flow_step` `AWAITING_INPUT` or `AWAITING_EXTERNAL_ACTION`, and throw if the stream ends without `SUCCESS`. With a previous successful login and a saved check URL, `login` first verifies the profile and reaches `SUCCESS` without typing (docs; unverified).
 
 ## React embed (Next.js App Router)
 
@@ -281,7 +281,7 @@ The shipped script takes `SITE_TOTP_SECRET` and sets `totp_secret`; with the SDK
 **Source** https://www.kernel.sh/docs/auth/faq; verified live.
 
 - `auto_reauth` only matters when `health_checks` is `true`; otherwise an expired session becomes `NEEDS_AUTH` with no attempt.
-- The lowest `health_check_interval` is plan-dependent: verified live: 60 got HTTP 400 `must be between 3600 and 86400 seconds` and 3600 was accepted. Read the 400 body or `kernel org limits get -o json` (`min_health_check_interval_seconds`); do not hard-code.
+- The lowest `health_check_interval` is plan-dependent (verified live: 60 got HTTP 400 `must be between 3600 and 86400 seconds` and 3600 was accepted). Read the 400 body or `kernel org limits get -o json` (`min_health_check_interval_seconds`); do not hard-code.
 
 ## 409 on create
 

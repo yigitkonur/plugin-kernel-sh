@@ -96,14 +96,14 @@ kp_detect() {
     KP_DET_ROOT="$_kp_dir"; _kp_head="nogit"
   fi
   case "$KP_DET_ROOT" in /|"${HOME:-/nonexistent-home}") return 0 ;; esac
-  _kp_key="$KP_DET_ROOT"
-  while :; do case "$_kp_key" in */*) _kp_key="${_kp_key%%/*}_${_kp_key#*/}" ;; *) break ;; esac; done
+  # cache key: checksum of the whole root path (so a_b and a/b never share an entry) plus a readable name
+  _kp_key="$(printf '%s' "$KP_DET_ROOT" | cksum | awk '{ print $1 "-" $2 }')-$(printf '%s' "${KP_DET_ROOT##*/}" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-40)"
   _kp_cache="$(kp_state_root)/detect-$_kp_key"
 
-  # 1. cache: same HEAD, no manifest (depth <= 2, plus .github/workflows) newer than the cache; negatives expire after a day
+  # 1. cache: same HEAD, no manifest (same depth as the scan, plus .github/workflows) newer than the cache; negatives expire after a day
   if [ -f "$_kp_cache" ]; then
     { IFS= read -r _kp_ch; } < "$_kp_cache"
-    if [ "$_kp_ch" = "$_kp_head" ] && [ -z "$(KP_CFG_DEPTH=2 kp_cfg_files "$KP_DET_ROOT" -newer "$_kp_cache" -print 2>/dev/null)" ]; then
+    if [ "$_kp_ch" = "$_kp_head" ] && [ -z "$(KP_CFG_DEPTH=3 kp_cfg_files "$KP_DET_ROOT" -newer "$_kp_cache" -print 2>/dev/null)" ]; then
       _kp_wf=""; [ -d "$KP_DET_ROOT/.github/workflows" ] && _kp_wf="$(find "$KP_DET_ROOT/.github/workflows" -maxdepth 1 -newer "$_kp_cache" 2>/dev/null)"
       { IFS= read -r _kp_ch; IFS= read -r KP_DET; IFS= read -r KP_DET_TIER; IFS= read -r KP_DET_SUMMARY
         KP_DET_EVIDENCE="$(cat)"; } < "$_kp_cache"

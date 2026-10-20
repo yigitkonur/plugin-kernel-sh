@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import Kernel from '@onkernel/sdk';
 
-const kernel = new Kernel();
+const kernel = new Kernel({ maxRetries: 0, timeout: 60_000 });
 assert.equal(typeof (kernel.browsers as any).delete, 'undefined', 'browsers.delete should not exist');
 
 const browser = await kernel.browsers.create({ headless: true, timeout_seconds: 60, tags: { lab: 'plugin-smoke', probe: 'lifecycle' } });

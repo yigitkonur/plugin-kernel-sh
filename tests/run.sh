@@ -108,6 +108,10 @@ if [ "$KP_HAVE_JQ" = 1 ]; then
   t_contains "events.jq keeps the diagnostic columns" "$EVOUT" 'network_response	500'
   t_contains "events.jq keeps a page-level failed navigation" "$EVOUT" 'net::ERR_ABORTED'
 fi
+# a_b and a/b used to map to one cache key: a negative result in one hid a Kernel project in the other
+mkdir -p "$W/ck/a_b" "$W/ck/a/b"; printf '{"dependencies":{"@onkernel/sdk":"^0.128.0"}}' > "$W/ck/a_b/package.json"; printf '{}' > "$W/ck/a/b/package.json"
+"$KP_SH" "$P/bin/kernel-plugin" detect --json "$W/ck/a/b" >/dev/null 2>&1
+t_contains "detect cache key is injective (a_b vs a/b)" "$("$KP_SH" "$P/bin/kernel-plugin" detect --json "$W/ck/a_b")" '"detected":true'
 # a relative path ('.') in two different non-git directories must not share a cache entry
 t_contains "detect '.' in a non-git positive dir" "$(cd "$W/det/nogit/pos-package-json" && "$KP_SH" "$P/bin/kernel-plugin" detect --json .)" '"detected":true'
 t_contains "detect '.' in a non-git negative dir is not served the positive's cache" "$(cd "$W/det/nogit/neg-plain-ts" && "$KP_SH" "$P/bin/kernel-plugin" detect --json .)" '"detected":false'

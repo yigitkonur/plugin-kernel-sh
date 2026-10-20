@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import Kernel from '@onkernel/sdk';
 
-const kernel = new Kernel();
+const kernel = new Kernel({ maxRetries: 0, timeout: 60_000 });
 const browser = await kernel.browsers.create({ headless: true, timeout_seconds: 60, tags: { lab: 'plugin-smoke', probe: 'execute-errors' } });
 try {
   const res = await kernel.browsers.playwright.execute(browser.session_id, { code: "throw new Error('deliberate');", timeout_sec: 30 });

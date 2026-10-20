@@ -70,5 +70,10 @@ V="$(tr -d '[:space:]' < VERSION)"
 [ -f "$P/THIRD_PARTY_NOTICES.md" ] || bad "missing $P/THIRD_PARTY_NOTICES.md (the installed plugin must carry the upstream MIT notice)"
 cmp -s THIRD_PARTY_NOTICES.md "$P/THIRD_PARTY_NOTICES.md" || bad "THIRD_PARTY_NOTICES.md differs between the repo root and $P"
 
+# 8 Claude Code substitutes $0, $1, ... and $ARGUMENTS in a skill body before the model sees it (a shell "$1" or a price like $0.48 gets rewritten)
+if grep -n -E '\$([0-9]|ARGUMENTS)' "$P"/skills/*/SKILL.md >/dev/null 2>&1; then
+  bad "a SKILL.md contains \$N or \$ARGUMENTS, which Claude Code rewrites: $(grep -n -E '\$([0-9]|ARGUMENTS)' "$P"/skills/*/SKILL.md | head -3 | cut -c1-120)"
+fi
+
 [ $fail = 0 ] && echo "validate: OK"
 exit $fail

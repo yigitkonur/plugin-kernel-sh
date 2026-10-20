@@ -43,7 +43,8 @@ out=$(kernel auth context -o json) && jq 'keys' <<<"$out" || echo "could not che
 out=$(kernel status -o json) && jq '{status}' <<<"$out" || echo "could not check: status"
 out=$(kernel org entitlements -o json) && jq '{plan: .plan.id, features: (.features | keys)}' <<<"$out" || echo "could not check: org entitlements"
 out=$(kernel org limits get -o json) && jq '{used: .concurrent_sessions_used, free: .concurrent_sessions_available, max: .max_concurrent_sessions}' <<<"$out" || echo "could not check: org limits get"
-out=$(kernel browsers list --status active --limit 100 -o json) && jq '[.[] | {session_id, name, created_at, timeout_seconds, headless, tags}]' <<<"$out" || echo "could not check: browsers list"
+# name and tags are free text from the account: mask key literals and URLs, cut to 60 characters
+out=$(kernel browsers list --status active --limit 100 -o json) && jq 'def red: if type=="string" then gsub("sk_[A-Za-z0-9_.-]+";"sk_***") | gsub("https?://[^ ]+";"<url>") | .[0:60] else . end; [.[] | {session_id, name: (.name|red), created_at, timeout_seconds, headless, tags: ((.tags // {}) | with_entries(.key |= red | .value |= red))}]' <<<"$out" || echo "could not check: browsers list"
 ```
 
 (`kernel-plugin` is the plugin's helper in `bin/`; if it is not on PATH, call it as `"${CLAUDE_PLUGIN_ROOT}/bin/kernel-plugin"`. The keys of `auth context`, `status`, `org limits get` and `org entitlements` (`features`, `plan`) were verified live; the `jq` projections above are built from those keys and were not each run for this skill.)

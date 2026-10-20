@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import Kernel from '@onkernel/sdk';
 
-const kernel = new Kernel();
+const kernel = new Kernel({ maxRetries: 0, timeout: 60_000 });
 const name = `kplab-smoke-${Date.now()}`;
 const profile = await kernel.profiles.create({ name });
 const tags = { lab: 'plugin-smoke', probe: 'profile' };

@@ -14,13 +14,14 @@ All code assumes `import Kernel from '@onkernel/sdk'` and `const kernel = new Ke
 
 ## 1. New target site: ask the registry before guessing
 
-**If** you are about to automate a site you have not run before -> **Do** (1) open it by hand in a dashboard browser and click through the flow you plan to automate; (2) `kernel.configRegistry.lookup({ url })`; (3) if `recommendation` is null, `resolve({ url, intent })` then `analyses.waitForResult(id, { maxWaitMs })`; (4) create the recommended managed proxy **once**, store its id, reuse it. -> **Avoid** guessing flags; re-running the setup (every run creates another proxy); reading a null `recommendation` as "site unreachable" (it means "no answer yet"); sending URLs with secrets, signed links or GET-triggered actions. -> **Source** https://www.kernel.sh/docs/config-registry.
+**If** you are about to automate a site you have not run before -> **Do** (1) open it by hand in a dashboard browser and click through the flow you plan to automate; (2) `kernel.configRegistry.lookup({ url })`; (3) if `recommendation` is null, `resolve({ url, intent })` then `analyses.waitForResult(id, { maxWaitMs })`; (4) create the recommended managed proxy through `kernel.proxies` **once** (look it up by name first), store its id, pass it to `browsers.create`. -> **Avoid** guessing flags; re-running the setup (every run creates another proxy); reading a null `recommendation` as "site unreachable" (it means "no answer yet"); sending URLs with secrets, signed links or GET-triggered actions. -> **Source** https://www.kernel.sh/docs/config-registry.
 
 ```ts
 const { recommendation } = await kernel.configRegistry.lookup({ url: 'https://www.google.com/recaptcha/api2/demo' });
 if (recommendation?.type === 'recommendation') {
   // recommendation.browser spreads into browsers.create (keys seen live: gpu, headless, stealth, viewport)
-  // recommendation.proxy.mode is 'managed' (then recommendation.proxy.create builds the proxy) or direct
+  // recommendation.proxy.mode is 'managed' (then create or retrieve a proxy through kernel.proxies, e.g. proxies.list({ name })
+  // then proxies.create, and pass its id as browsers.create({ proxy: { id } })) or direct
 }
 ```
 
@@ -86,12 +87,22 @@ const b = await kernel.browsers.create({ stealth: true, proxy: { mode: 'direct' 
 **If** the account logs in, a site allowlists your IP, or a session must keep the same IP across runs -> **Do** create one ISP proxy, read its `ip_address`, and select it on every browser. ISP proxies keep one static exit IP across sessions. -> **Avoid** relying on the stealth pool IP across sessions (it can change); creating a new proxy per run (it clutters the project; look it up by name instead). -> **Source** https://www.kernel.sh/docs/proxies/isp.
 
 ```ts
-const proxy = await kernel.proxies.create({ type: 'isp', name: 'my-site-isp' }); // country defaults to US
+const NAME = 'my-site-isp';
+let proxy: { id?: string } | undefined;
+for await (const p of kernel.proxies.list({ name: NAME })) { proxy = p; break; }       // look up by name first: names are not unique, reuse the first match
+proxy ??= await kernel.proxies.create({ type: 'isp', name: NAME }, { maxRetries: 0, timeout: 30_000 }); // only when absent; country defaults to US
 const proxyId = proxy.id!;                                // typed optional in the response
 const checked = await kernel.proxies.check(proxyId);      // returns the proxy: ip_address, status 'available'
-const browser = await kernel.browsers.create({ proxy: { id: proxyId } });
-// ... drive it; the egress IP equals proxy.ip_address
-await kernel.browsers.deleteByID(browser.session_id);
+const browser = await kernel.browsers.create(
+  { proxy: { id: proxyId }, tags: { run: process.env.RUN_ID ?? 'local' } },
+  { maxRetries: 0, timeout: 30_000 });
+try {
+  // ... drive it; the egress IP equals checked.ip_address
+} finally {
+  await kernel.browsers.deleteByID(browser.session_id).catch((e) => {
+    if (!(e instanceof Kernel.NotFoundError)) throw e;
+  });
+}
 ```
 
 - `proxies.create` with `{ type: 'isp', name }` worked on Hobbyist; `proxies.delete(id)` then retrieve returns 404. The docs say proxies unused for 14 days may be auto-deleted when the org has over 100; attached ones are kept.
@@ -121,12 +132,19 @@ const browser = await kernel.browsers.create({
   headless: false,
   timeout_seconds: 300,
   telemetry: { browser: { captcha: { enabled: true } } },
-});
-const stream = await kernel.browsers.telemetry.stream(browser.session_id, { replay: 'all' });
-for await (const frame of stream as AsyncIterable<any>) {
-  const ev = frame.event;                       // frames are wrapped: { seq, event: { type, category, data } }
-  if (ev?.category !== 'captcha') continue;     // top-level frame.type / frame.category are undefined
-  console.log(ev.type, ev.data?.status, ev.data?.task_id);
+  tags: { run: process.env.RUN_ID ?? 'local' },
+}, { maxRetries: 0, timeout: 30_000 });
+try {
+  const stream = await kernel.browsers.telemetry.stream(browser.session_id, { replay: 'all' });
+  for await (const frame of stream as AsyncIterable<any>) {
+    const ev = frame.event;                       // frames are wrapped: { seq, event: { type, category, data } }
+    if (ev?.category !== 'captcha') continue;     // top-level frame.type / frame.category are undefined
+    console.log(ev.type, ev.data?.status, ev.data?.task_id);
+  }
+} finally {
+  await kernel.browsers.deleteByID(browser.session_id).catch((e) => {
+    if (!(e instanceof Kernel.NotFoundError)) throw e;
+  });
 }
 ```
 (hand-written from a live frame dump; the unwrap was confirmed from live frames, but this loop is untested as written. The live test matched on raw text.)

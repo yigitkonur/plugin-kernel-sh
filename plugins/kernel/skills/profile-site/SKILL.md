@@ -9,7 +9,7 @@ disable-model-invocation: true
 
 # Profile a site's bot detection with Kernel
 
-You are measuring how one website treats a Kernel stealth browser and a normal Kernel browser on the same network, naming the anti-bot vendors it uses, and recommending a Kernel configuration. Read-only toward the site (two page loads per browser: home page and a login page the analyzer finds, plus up to seven HEAD requests to common login paths when no login link is found). Creates two billable headful browsers (about $0.48/hour each, so roughly a few cents for ~5 minutes; Kernel pricing page, checked 2026-10-20); you delete both before you finish.
+You are measuring how one website treats a Kernel stealth browser and a normal Kernel browser on the same network, naming the anti-bot vendors it uses, and recommending a Kernel configuration. Read-only toward the site (two page loads per browser: home page and a login page the analyzer finds, plus up to seven HEAD requests to common login paths when no login link is found). Creates two billable headful browsers (about 0.48 USD per hour each, so roughly a few cents for ~5 minutes; Kernel pricing page, checked 2026-10-20); you delete both before you finish.
 
 Use it for a real target. A fingerprint test page such as bot.sannysoft.com cannot tell the modes apart: in a live run it gave 57 per-check results, all passing and identical in stealth and normal. If the URL is a fingerprint-test page, stop and ask for a real protected site; continue only if the user wants just that page profiled, and then state in the report that stealth and normal cannot be told apart on it.
 
@@ -18,7 +18,7 @@ Browsers: by default both are created at once. If `concurrent_sessions_available
 The argument is the text after the skill name in the user's message (or the line starting `ARGUMENTS:`). It is a URL or hostname. If it is missing, ask for it and stop. Normalize a bare hostname to `https://<host>/`. Refuse and ask again if the URL has credentials, tokens, signed query strings, a path whose GET triggers an action, or any of `'`, `;`, `$`, a backtick or whitespace (the URL is written into a shell state file and a command). Only profile public sites the user is allowed to test (https://www.kernel.sh/docs/config-registry).
 
 Rules for the whole run:
-- Never print `KERNEL_API_KEY`, `cdp_ws_url`, `webdriver_ws_url`, `browser_live_view_url`, `base_url`, or any URL with a query string. The analyzer logs the live view URL and stores the CDP and live view URLs in its report JSON, so never `cat` a log or report; read them only through the `jq`/`grep` filters below.
+- Never print `KERNEL_API_KEY`, `cdp_ws_url`, `webdriver_ws_url`, `browser_live_view_url`, `base_url`, or any URL with a query string. The analyzer prints and stores no session URLs (it reports the session id only) and logs vendor URLs without query or fragment, so its logs hold no URLs; reports still hold request metadata, so never `cat` a log or report, and read them only through the `jq`/`grep` filters below.
 - Run one step per Bash call and keep the work directory path, run id and browser ids in `$W/state.env` (shell variables do not survive between calls). Start every call with `source "$W/state.env"` once it exists. Set the Bash timeout to 600000 ms for step 5.
 - If any step after step 4 fails, go straight to step 7 (cleanup), then report. Never leave a browser alive. Total budget: abort and clean up at 15 minutes (`$(( $(date +%s) - START ))` above 900; START is in `state.env` after step 4).
 
@@ -65,14 +65,15 @@ The analyzer is Kernel's official script (see `scripts/NOTICE.md`), with `packag
 ```bash
 W=$(mktemp -d /tmp/profile-site.XXXXXX)
 cp -R "<SKILL_DIR>/scripts" "$W/scripts"
-(cd "$W/scripts" && npm ci --ignore-scripts --no-audit --no-fund > "$W/npm.log" 2>&1) || { tail -n 5 "$W/npm.log"; echo "npm ci failed"; }
+(cd "$W/scripts" && npm ci --ignore-scripts --no-audit --no-fund > "$W/npm.log" 2>&1) || { tail -n 5 "$W/npm.log"; echo "npm ci failed"; exit 1; }
 TARGET_URL='<URL>'
-HOST=$(TARGET_URL="$TARGET_URL" node -e 'console.log(new URL(process.env.TARGET_URL).hostname.replace(/^www\./, "").replace(/\./g, "-"))')
+HOST=$(TARGET_URL="$TARGET_URL" node -e 'console.log(new URL(process.env.TARGET_URL).hostname.replace(/^www\./, "").replace(/\./g, "-"))') || { echo "URL does not parse"; exit 1; }
+[ -n "$HOST" ] || { echo "empty host"; exit 1; }
 { printf 'W=%q\n' "$W"; printf 'RUN=%q\n' "$(basename "$W")"; printf 'TARGET_URL=%q\n' "$TARGET_URL"; printf 'HOST=%q\n' "$HOST"; } > "$W/state.env"
 echo "$W"
 ```
 
-If `npm ci` fails or the URL does not parse, report it and stop (nothing is created yet).
+If `npm ci` fails or the URL does not parse, the block above exits before `state.env` is written: report it and stop (nothing is created yet).
 
 ## 4. Create both browsers on the same network
 
@@ -107,7 +108,7 @@ KERNEL_BROWSER_ID="$STEALTH_ID" TARGET_URL="$TARGET_URL" BROWSER_MODE=stealth OU
 grep -E 'BLOCKED|DATADOME|Vendor analysis completed|Test failed' "$W/stealth.log" | sed -E 's/\?[^ "]*/?***/g' | head -n 15
 ```
 
-Then the same with `NORMAL_ID`, `BROWSER_MODE=normal`, `normal.log`. A non-zero exit or a `Test failed` line: show the masked grep output, go to step 7, and report that browser's result as "no data".
+The logs hold no URLs (no session URLs; vendor URLs are origin and path only), so keeping them in `$W` is fine. Then the same with `NORMAL_ID`, `BROWSER_MODE=normal`, `normal.log`. A non-zero exit or a `Test failed` line: show the masked grep output, go to step 7, and report that browser's result as "no data".
 
 ## 6. Compare, without printing secrets
 
@@ -118,8 +119,7 @@ source "$W/state.env"
 for m in stealth normal; do
   R=$(ls -t "$W/output/$HOST/$m"/report-*.json 2>/dev/null | head -n 1)
   [ -n "$R" ] || { echo "no $m report"; continue; }
-  # strip the CDP and live view URLs from the saved report; it still holds site cookies and headers, so tell the user not to share $W
-  jq 'del(.kernelSession.cdpWsUrl, .kernelSession.liveViewUrl)' "$R" > "$R.tmp" && mv "$R.tmp" "$R"
+  # the saved report holds no session URLs and no cookie values or sensitive header values (names and vendor evidence only)
   echo "=== $m ==="
   jq '{verdict: .summary.verdict, isBlocked: .summary.isBlocked, hasSuspicion: .summary.hasSuspicion, vendors: .summary.vendorNames, blockedPages: [.summary.blockedPages[]? | {page, blockType, vendor, confidence}], blockedVendors: .summary.blockedVendors, suspicious: [.summary.suspiciousPages[]? | {page, blockType}]}' "$R"
   jq -r '.vendorDetections | to_entries[] | "\(.key): \([.value.products[].product] | unique | join(", "))"' "$R"
@@ -130,16 +130,25 @@ A `BLOCKED` verdict from the analyzer is a heuristic: confirm it by looking at t
 
 ## 7. Cleanup (always run, even after a failure)
 
-Run now. It lists active browsers (`--limit 100`; the default is 20, and on a shared account the tag filter can miss yours and the final count can falsely be 0), selects yours by the `run` tag on the client side, and deletes one id per call so one 404 does not stop the rest:
+Run now. It lists active browsers 100 at a time (`--limit 100` with `--offset`; the default is 20), checks the exit status of every list call, selects yours by the `run` tag on the client side (on a shared account the server-side tag filter alone can miss yours), collects all ids first (deleting while paging would shift the offsets), then deletes one id per call and tolerates only NotFound:
 
 ```bash
 source "$W/state.env"
-kernel browsers list --status active --limit 100 -o json | jq -r --arg run "$RUN" '.[] | select(.tags.run == $run) | .session_id' > "$W/alive.txt"
-while read -r id; do [ -n "$id" ] && { kernel browsers delete "$id" || true; }; done < "$W/alive.txt"
-kernel browsers list --status active --limit 100 -o json | jq --arg run "$RUN" '[.[] | select(.tags.run == $run)] | length'
+collect() { : > "$DST"; off=0
+  while :; do
+    kernel browsers list --status active --limit 100 --offset "$off" -o json > "$W/list.json" || return 1
+    n=$(jq 'length' "$W/list.json") || return 1
+    jq -r --arg run "$RUN" '.[] | select(.tags.run == $run) | .session_id' "$W/list.json" >> "$DST" || return 1
+    [ "$n" -lt 100 ] && return 0; off=$((off + 100))
+  done; }
+DST="$W/alive.txt" collect || echo "LIST FAILED: cleanup not confirmed, repeat this step"
+while read -r id; do [ -n "$id" ] || continue
+  out=$(kernel browsers delete "$id" 2>&1) || case "$out" in *404*|*[Nn]ot\ [Ff]ound*) ;; *) echo "delete failed: $id";; esac
+done < "$W/alive.txt"
+DST="$W/left.txt" collect && echo "left with this run tag: $(grep -c . "$W/left.txt")" || echo "LIST FAILED: cannot confirm zero left"
 ```
 
-If the final count is not 0, repeat the loop once and name any id you could not delete in the report. If `state.env` is lost, the run id is the work directory's basename (`profile-site.XXXXXX`); never delete browsers whose `run` tag differs. Keep `$W/output` for the user unless they ask you to remove it.
+If the final line is not `left with this run tag: 0` (including `LIST FAILED`), repeat the block once and name any id you could not delete or confirm in the report; never write "0 left" without that line. If `state.env` is lost, the run id is the work directory's basename (`profile-site.XXXXXX`); never delete browsers whose `run` tag differs. Keep `$W/output` for the user unless they ask you to remove it.
 
 ## 8. Interpret and recommend
 
@@ -195,7 +204,7 @@ Stealth effect: <effective | no effect | inconclusive> because <one line>
 Recommended configuration: <rung and create params, or "normal headful">
 Next steps: <up to 3 bullets, one per detected vendor or block>
 Cleanup: <ids deleted, active browsers left with run=<RUN>: 0 or the ids>
-Evidence kept at: <$W/output path> (contains site cookies and headers; do not share)
+Evidence kept at: <$W/output path> (contains cookie names, header names and vendor evidence, no values or session URLs; still do not share)
 Not verified: <list anything skipped or failed>
 ```
 

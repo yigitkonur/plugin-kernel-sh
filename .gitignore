@@ -1,8 +1,9 @@
+!.env.example
+.DS_Store
 .env
 .env.*
-!.env.example
-node_modules/
-**/results/
-.DS_Store
+.snippet-check-*
 *.local.*
+**/results/
 lab/out/
+node_modules/

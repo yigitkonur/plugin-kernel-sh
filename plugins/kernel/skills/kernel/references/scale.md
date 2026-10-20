@@ -39,10 +39,14 @@ import Kernel from '@onkernel/sdk';
 const kernel = new Kernel();
 const POOL = 'my-pool';
 
-const browser = await kernel.browserPools.acquire(POOL, {
-  acquire_timeout_seconds: 60,
-  tags: { run: 'job-42' }, // lease-only tags: makes the lease findable
-});
+const browser = await kernel.browserPools.acquire(
+  POOL,
+  {
+    acquire_timeout_seconds: 60,
+    tags: { run: 'job-42' }, // lease-only tags: makes the lease findable
+  },
+  { maxRetries: 0, timeout: 90_000 }, // timeout must exceed acquire_timeout_seconds
+);
 if (!browser) throw new Error('no browser ready before the deadline'); // 204 surfaces as null
 try {
   // drive browser.cdp_ws_url or kernel.browsers.playwright.execute(browser.session_id, ...)
@@ -100,15 +104,19 @@ async function waitForFill(pool: string, size: number, deadlineMs = 240_000) {
 - No persistent state needed: just release with `reuse: false`.
 
 ```ts
-const w = await kernel.browserPools.acquire(POOL, {
-  acquire_timeout_seconds: 120,
-  profile: { name: 'user-8f21c3', save_changes: true },
-});
+const w = await kernel.browserPools.acquire(
+  POOL,
+  {
+    acquire_timeout_seconds: 120,
+    profile: { name: 'user-8f21c3', save_changes: true },
+  },
+  { maxRetries: 0, timeout: 150_000 }, // timeout must exceed acquire_timeout_seconds
+);
 if (!w) throw new Error('no browser ready before the deadline');
 try {
   // drive w.cdp_ws_url as that user
 } finally {
-  await kernel.browserPools.release(POOL, { session_id: w.session_id, reuse: false });
+  await kernel.browserPools.release(POOL, { session_id: w.session_id, reuse: false }, { maxRetries: 0, timeout: 30_000 });
 }
 ```
 
@@ -117,7 +125,7 @@ Release several leases and clean up the pool without one failed release hiding t
 ```ts
 // leases: { session_id: string }[] acquired earlier from POOL
 const results = await Promise.allSettled(
-  leases.map((l) => kernel.browserPools.release(POOL, { session_id: l.session_id, reuse: false })),
+  leases.map((l) => kernel.browserPools.release(POOL, { session_id: l.session_id, reuse: false }, { maxRetries: 0, timeout: 30_000 })),
 );
 for (const r of results) {
   // 404 "session not found in pool" means the lease is already gone: fine
@@ -213,7 +221,11 @@ async function one(url: string) {
   } catch (e) {
     return { url, ok: false, result: String(e) }; // per-item catch: others keep going
   } finally {
-    if (id) await kernel.browsers.deleteByID(id).catch(() => {}); // 404 = already reaped; a create that timed out client-side is found by the run tag
+    if (id) {
+      await kernel.browsers.deleteByID(id).catch((e) => {
+        if (!(e instanceof Kernel.NotFoundError)) throw e; // 404 = already reaped; anything else is real
+      });
+    }
   }
 }
 
@@ -227,6 +239,19 @@ await Promise.all(
 console.log(out.length, 'done,', out.filter((r) => !r.ok).length, 'failed');
 ```
 
+A create that timed out client-side may still have made a browser, and `id` is only set after the create resolves, so the run tag is what finds it. Make `RUN_ID` unique per run (never a shared tag) and sweep after the run, deleting only browsers carrying it:
+
+```ts
+// post-run sweep: list by the unique run tag, delete only those
+const runId = process.env.RUN_ID!; // unique per run, e.g. a UUID set before the run
+for await (const b of kernel.browsers.list({ status: 'active', tags: { run: runId } })) {
+  if (b.tags?.run !== runId) continue; // never delete what the filter did not prove is ours
+  await kernel.browsers.deleteByID(b.session_id).catch((e) => {
+    if (!(e instanceof Kernel.NotFoundError)) throw e;
+  });
+}
+```
+
 **If** you get 429 on create -> **Do** queue on your side (BullMQ or any queue, worker concurrency at or below `concurrent_sessions_available` or pool size), back off, honor `Retry-After`. The SDK already retries 429 up to 2 times honoring `Retry-After`, then throws `RateLimitError` with the headers. -> **Avoid** tightening the retry loop (a 429 means the org is over budget for the minute) and hand-rolled retry stacked on the SDK's.
 
 **If** you get a 5xx -> the SDK maps every status >= 500 to `InternalServerError`; there is no capacity or 529 class (read from `core/error.ts`). Treat it like 429: slow down. Whether the API ever returns 529, and what status a concurrency overflow returns, is (unverified: not documented, not produced live).
@@ -234,8 +259,11 @@ console.log(out.length, 'done,', out.filter((r) => !r.ok).length, 'failed');
 ```ts
 // untested: slow-down branch
 try {
-  const b = await kernel.browsers.create({ timeout_seconds: 300 });
-  // ...
+  const b = await kernel.browsers.create(
+    { timeout_seconds: 300, tags: { run: process.env.RUN_ID! } },
+    { maxRetries: 0, timeout: 30_000 }, // a timeout may still have created one: sweep by run tag as above
+  );
+  // ... try/finally with deleteByID, NotFoundError-only, as above
 } catch (e) {
   if (e instanceof Kernel.RateLimitError) { /* requeue after e.headers?.get('retry-after') */ }
   else if (e instanceof Kernel.InternalServerError) { /* requeue with backoff */ }

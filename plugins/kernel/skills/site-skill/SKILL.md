@@ -45,14 +45,14 @@ kernel profiles create --name "<site>-<user-id>"
 kernel vaults create --name "<site>-<user-id>"   # only if the site needs a login
 ```
 
-Create the browser. Headful is the default and live view needs it (headless returns no `browser_live_view_url`). Prefer headful for computer calls. `--stealth` and `--vault` can only be set at creation. The CLI default `--timeout` is 60 seconds; use more for discovery:
+Pick one unique run tag now, for example `site-skill-<site>-<6 random letters or digits>`, and write its literal value in every browser command of this run (steps 3, 7 and 8). Create the browser. Headful is the default and live view needs it (headless returns no `browser_live_view_url`). Prefer headful for computer calls. `--stealth` and `--vault` can only be set at creation. The CLI default `--timeout` is 60 seconds; use more for discovery:
 
 ```bash
-kernel browsers create --profile-name "<site>-<user-id>" --save-changes --stealth \
+kernel browsers create --profile-name "<site>-<user-id>" --tag "run=<run-tag>" --save-changes --stealth \
   --vault "<site>-<user-id>" --timeout 600 -o json | jq -r '.session_id'
 ```
 
-Print the id once; if it is empty, stop. Use that literal id wherever this file says `<browser-id>`. Omit `--vault` for sites with no login. The combined command is unverified; `--save-changes` needs a profile. Profile facts: changes are saved only when a session created with `--save-changes` is deleted (closing the CDP client saves nothing); without the flag they are discarded; with two writers the last wins, so run one writer per profile.
+Add `--save-changes` only if you created that profile in this run (step 3 `profiles create`); for a profile that existed before, drop the flag so deleting the browser cannot overwrite it. Print the id once; if it is empty, stop. Use that literal id wherever this file says `<browser-id>`. Omit `--vault` for sites with no login. The combined command is unverified; `--save-changes` needs a profile. Profile facts: changes are saved only when a session created with `--save-changes` is deleted (closing the CDP client saves nothing); without the flag they are discarded; with two writers the last wins, so run one writer per profile.
 
 ## 4. Establish login (only if the site needs it)
 
@@ -89,7 +89,7 @@ kernel vaults items invoke "<site>-<user-id>" "<site>-login" fill --spec-file - 
 JSON
 ```
 
-Accept only `status` `completed`; on `failed` or `unknown`, stop and check the page, do not loop. Never print or screenshot filled values. If bot detection blocks login without `--stealth`, recreate the browser with it. If still blocked, ask the user to log in by hand: run `kernel browsers view <browser-id> -o json` and give the `browser_live_view_url` to the user in ONE message, then verify the logged-in state yourself.
+Accept only `status` `completed`; on `failed` or `unknown`, stop and check the page, do not loop. Never print or screenshot filled values. If bot detection blocks login without `--stealth`, recreate the browser with it. If still blocked, ask the user to log in by hand: run `kernel browsers view "<browser-id>" -o json | jq -r '.browser_live_view_url // empty'` (never without the jq; the JSON key is unverified, so if it prints nothing tell the user to run `kernel browsers view "<browser-id>"` themselves) and give that URL to the user in ONE message, then verify the logged-in state yourself.
 
 ## 5. Explore and verify each task
 
@@ -151,26 +151,26 @@ Include the credential field schema (names, types, sensitive flags), field-to-se
 Leak check before the file is final. Run this on the draft and fix every hit:
 
 ```bash
-grep -nEi 'jwt=|wss?://|token=|session=|api[_-]?key|password|@[a-z0-9.-]+\.[a-z]{2,}' <file>
+grep -nEi 'jwt=|handoff_code=|wss?://|onkernel\.com/browser/(live|replay|cdp)|token=|session=|api[_-]?key|password|@[a-z0-9.-]+\.[a-z]{2,}' <file>
 ```
 
 Strip query strings from documented URLs and remove any recorded ids. `password` hits are fine only as a field name or type, never a value. Re-run until only those remain.
 
 ## 7. Clean up
 
-Delete the browser (this saves the profile if created with `--save-changes`) and the screenshot:
+Delete the browser (this saves the profile if created with `--save-changes`) and the screenshot; `<run-tag>` is the exact value from step 3:
 
 ```bash
 kernel browsers delete <browser-id>
 rm -f /tmp/state.png
-kernel browsers list --status active --tag <the tag you created the browser with> -o json | jq length   # expect 0; the account may hold other people's browsers
+kernel browsers list --status active --tag "run=<run-tag>" -o json | jq length   # expect 0; the account may hold other people's browsers
 ```
 
 Delete a vault, item or profile only if you created it in this run for throwaway discovery and the user agrees; never one that existed before.
 
 ## 8. Cold run
 
-Create a fresh browser (no `--save-changes`), follow the new skill's steps once exactly as written and check each success condition. Fix the skill where it fails and re-run the leak check. Then run step 7 for this browser. No task counts as verified without this run.
+Create a fresh browser (the step 3 command with the same `--tag "run=<run-tag>"` and without `--save-changes`), follow the new skill's steps once exactly as written and check each success condition. Fix the skill where it fails and re-run the leak check. Then run step 7 for this browser. No task counts as verified without this run.
 
 ## Report to the user
 

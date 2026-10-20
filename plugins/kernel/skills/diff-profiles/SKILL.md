@@ -15,7 +15,7 @@ This skill is user-invoked (`/kernel:diff-profiles <a> <b>`; the model cannot st
 
 ## Rules
 
-- Never print cookie values, `Login Data` username/password columns, tokens, or storage values. Emit host, name, lengths, counts and presence only.
+- Never print cookie values, `Login Data` username/password columns, tokens, or storage values. Emit host, name, lengths, counts and presence only; bytes extracted from LevelDB storage are never printed, only counts and short hashes (step 5).
 - Never print API keys or any CDP / live-view / replay / hosted-login URL.
 - The extracted profile is sensitive. Put it in a new empty temp directory and remove it on every exit path (step 7).
 - Only read: `profiles get`, `profiles download`, `browsers list`. Never create or delete resources.
@@ -106,24 +106,31 @@ diff diff/pref-keys-a.txt diff/pref-keys-b.txt | head -60
 
 Look at `intl.*`, `profile.default_content_setting_values`, `webrtc.*`, `extensions.settings`, `dns_over_https.*`. Preferences can hold identifiers; the diff above lists key paths only. To check a value, query one known non-sensitive path (for example `jq '.intl.accept_languages'`), never the whole file.
 
-**Local Storage and Session Storage** (LevelDB, read with `strings`, key names and origins only, never values). LevelDB stores a value right after its key, so a token can match the key pattern. Patterns are capped and a guard discards the whole file if any line is over 40 chars or token-shaped:
+**Local Storage and Session Storage** (LevelDB, read with `strings`). LevelDB stores a value right after its key, so extracted bytes can be a token. Therefore nothing extracted is ever printed: the raw lists stay in private files, a guard discards a whole file if any line is over 40 chars or token-shaped, and only counts, lengths and the first 8 hex characters of each sha256 are shown. That is enough to compare which keys and origins exist on each side (equal hash = same key):
 
 ```bash
-guard() { ! awk 'length>40 || /eyJ/ || /[A-Za-z0-9+\/_=-]{24,}/ {f=1} END{exit !f}' "$1"; }
+guard() { ! awk 'length>40 || /eyJ/ || /[A-Za-z0-9+\/_=-]{24,}/ {f=1} END{exit !f}' "$@"; }
+h8() { while IFS= read -r k; do printf '%s %s\n' "$(printf %s "$k" | shasum -a 256 | cut -c1-8)" "${#k}"; done; }
 for s in a b; do
   SS=$(find "$s" -type d -name 'Session Storage' -not -path '*/Extension*' | head -1)
-  [ -n "$SS" ] && strings "$SS"/*.log "$SS"/*.ldb 2>/dev/null | grep -oE 'map-[0-9]+-[A-Za-z._0-9-]{1,41}' | sed -E 's/^map-[0-9]+-//' | sort -u > "diff/ss-keys-$s.txt"
+  [ -n "$SS" ] && strings "$SS"/*.log "$SS"/*.ldb 2>/dev/null | grep -oE 'map-[0-9]+-[A-Za-z._0-9-]{1,41}' | sed -E 's/^map-[0-9]+-//' | sort -u > "diff/ss-raw-$s.txt"
   LS=$(find "$s" -type d -name 'Local Storage' -not -path '*/Extension*' | head -1)
-  [ -n "$LS" ] && strings "$LS"/leveldb/*.log "$LS"/leveldb/*.ldb 2>/dev/null | grep -oE '^_https?://[A-Za-z0-9.-]{1,41}(:[0-9]{1,5})?' | sort -u > "diff/ls-origins-$s.txt"
+  [ -n "$LS" ] && strings "$LS"/leveldb/*.log "$LS"/leveldb/*.ldb 2>/dev/null | grep -oE '^_https?://[A-Za-z0-9.-]{1,41}(:[0-9]{1,5})?' | sort -u > "diff/ls-raw-$s.txt"
 done
-for f in ss-keys-a ss-keys-b ls-origins-a ls-origins-b; do [ -f "diff/$f.txt" ] && ! guard "diff/$f.txt" && rm -f "diff/$f.txt" && echo "DISCARDED $f"; done
-[ -f diff/ss-keys-a.txt ] && [ -f diff/ss-keys-b.txt ] && diff diff/ss-keys-a.txt diff/ss-keys-b.txt | head -40
-[ -f diff/ls-origins-a.txt ] && [ -f diff/ls-origins-b.txt ] && diff diff/ls-origins-a.txt diff/ls-origins-b.txt | head -40
+for f in ss-raw-a ss-raw-b ls-raw-a ls-raw-b; do [ -f "diff/$f.txt" ] && ! guard "diff/$f.txt" && rm -f "diff/$f.txt" && echo "DISCARDED $f"; done
+for k in ss ls; do for s in a b; do R="diff/$k-raw-$s.txt"; [ -f "$R" ] || continue
+  echo "$k $s: $(grep -c . "$R") entries, $(grep -ciE 'auth|token|session|guid|sid' "$R") auth-shaped names"
+  h8 < "$R" | sort -u > "diff/$k-hash-$s.txt"
+done; done
+rm -f diff/ss-raw-*.txt diff/ls-raw-*.txt
+for k in ss ls; do [ -f "diff/$k-hash-a.txt" ] && [ -f "diff/$k-hash-b.txt" ] && echo "$k only in A: $(comm -23 diff/$k-hash-a.txt diff/$k-hash-b.txt | grep -c .), only in B: $(comm -13 diff/$k-hash-a.txt diff/$k-hash-b.txt | grep -c .)" && diff diff/$k-hash-a.txt diff/$k-hash-b.txt | head -40; done
 ```
 
-A storage surface can be present yet yield nothing. In a real run, Session/Local Storage had 6 files per profile and the patterns extracted zero keys on both sides; that cannot tell "the site stores nothing there" from "the pattern missed LevelDB content" (`strings` only sees uncompressed bytes, and `.ldb` blocks may be compressed). So if a surface has files but its key file is empty or missing, never write "no difference". Report `Session Storage: no keys extracted (files present: N)` (same for Local Storage) and fall back to file counts and `du -sk` sizes of the directory on each side, e.g. `for s in a b; do find "$s" -type d -name 'Session Storage' -not -path '*/Extension*' | head -1 | while read -r d; do echo "$s $(ls "$d" | wc -l) files $(du -sk "$d" | cut -f1) KB"; done; done`. Treat a count or size difference as a hint only, and say key names were not compared. How to tell empty from missed: if the directories hold only tiny files (a few KB, the same on both sides), the profiles are probably empty there; if they hold tens of KB or more and still yield 0 keys, the pattern probably missed, so report "not checked" rather than "empty".
+The diff shows `<hash> <length>` pairs, never names. `ss` is Session Storage keys, `ls` is Local Storage origins. Never `cat` the raw files before they are removed, and do not rerun the extraction with output to the screen.
 
-If a file was discarded, show neither diff of that pair; report `Session Storage: not checked (value bytes adjacent)` (or `Local Storage: ...`) under "Not checked". `map-N` numbers differ between profiles and mean nothing; the `sed` strips them. Look for auth-shaped keys missing on B (`authCookie`, `sessionGUID`, `*_token`, tenant or account GUIDs).
+A storage surface can be present yet yield nothing. In a real run, Session/Local Storage had 6 files per profile and the patterns extracted zero keys on both sides; that cannot tell "the site stores nothing there" from "the pattern missed LevelDB content" (`strings` only sees uncompressed bytes, and `.ldb` blocks may be compressed). So if a surface has files but its entries count is 0 or the line is missing, never write "no difference". Report `Session Storage: no keys extracted (files present: N)` (same for Local Storage) and fall back to file counts and `du -sk` sizes of the directory on each side, e.g. `for s in a b; do find "$s" -type d -name 'Session Storage' -not -path '*/Extension*' | head -1 | while read -r d; do echo "$s $(ls "$d" | wc -l) files $(du -sk "$d" | cut -f1) KB"; done; done`. Treat a count or size difference as a hint only, and say the key set was not compared. How to tell empty from missed: if the directories hold only tiny files (a few KB, the same on both sides), the profiles are probably empty there; if they hold tens of KB or more and still yield 0 keys, the pattern probably missed, so report "not checked" rather than "empty".
+
+If a file was discarded, show neither diff of that pair; report `Session Storage: not checked (value bytes adjacent)` (or `Local Storage: ...`) under "Not checked". `map-N` numbers differ between profiles and mean nothing; the `sed` strips them. Compare the "auth-shaped names" counts and the "only in A" and "only in B" counts: A having auth-shaped names that B lacks is the lead (tenant or account GUIDs, `*_token`, session ids). Names are not shown on purpose; if the user needs to know which key it is, tell them to inspect it in DevTools on their own machine.
 
 **Extensions and Login Data**:
 ```bash
@@ -171,7 +178,7 @@ Issue: <one line>
 Profiles: A <id>, updated <ts>; B <id>, updated <ts>
 
 Likely root causes (ranked)
-1. <finding> - evidence: <surface, host/key names, lengths> - why it matches the issue
+1. <finding> - evidence: <surface, host names from cookies, counts, hash/length pairs> - why it matches the issue
 2. ...
 
 Other differences (probably unrelated)

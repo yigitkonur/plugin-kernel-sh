@@ -4,7 +4,7 @@ Read this when code or an agent must act on a page, read files out of the VM, or
 
 Recipes in this file: full-page screenshot (section 2), scrape many elements (section 2, last bullet), download (section 8), upload (section 8).
 
-All code assumes `import Kernel from '@onkernel/sdk'` and `const kernel = new Kernel()` (key from `KERNEL_API_KEY`), and `const id = browser.session_id`.
+All code assumes `import Kernel from '@onkernel/sdk'`, `const kernel = new Kernel()` (key from `KERNEL_API_KEY`), `const id = browser.session_id`, and `const ignoreNotFound = (e: unknown) => { if (!(e instanceof Kernel.NotFoundError)) throw e; };`. Calls with side effects pass `{ maxRetries: 0, timeout: <ms> }`.
 
 ## 1. Pick the control surface
 
@@ -100,23 +100,25 @@ const safeGoto = `try { const r = await page.goto(${JSON.stringify(url)}); retur
 **If** several tasks must run at the same time against one browser identity (one profile, one login) -> **Do** give each task an executor name and send every call of that task to it:
 
 ```ts
-const browser = await kernel.browsers.create({ headless: true, memory: '4GiB', timeout_seconds: 180 });
-const ping = (executor: string) =>
-  kernel.browsers.playwright.execute(browser.session_id, {
-    executor,
-    code: 'return { title: await page.title(), pages: context.pages().length };',
-    timeout_sec: 30,
-  });
-// ... Promise.all([ping('lane-1'), ping('lane-2')]) ...
-await kernel.browsers.playwright.executors.delete('lane-1', { id_or_name: browser.session_id, close_tab: true });
+const browser = await kernel.browsers.create({ headless: true, memory: '4GiB', timeout_seconds: 180 },
+  { maxRetries: 0, timeout: 30_000 });
+try {
+  const ping = (executor: string) => kernel.browsers.playwright.execute(browser.session_id,
+    { executor, code: 'return { title: await page.title(), pages: context.pages().length };', timeout_sec: 30 },
+    { maxRetries: 0, timeout: 40_000 });
+  // ... Promise.all([ping('lane-1'), ping('lane-2')]) ...
+  await kernel.browsers.playwright.executors.delete('lane-1', { id_or_name: browser.session_id, close_tab: true });
+} finally {
+  // deleting an executor does not delete the browser
+  await kernel.browsers.deleteByID(browser.session_id).catch(ignoreNotFound);
+}
 ```
 (ran live, trimmed)
 
 - Each named executor owns one tab; calls on one executor run one at a time, calls on different executors run concurrently. `globalThis` is per executor.
-- Names match `^[A-Za-z0-9_-]{1,64}$`.
-- Limit: 8 named executors; the default one does not count. The 9th new name is HTTP 409 (`ConflictError`) with body `{ code, executors, message }`. Delete one with `close_tab: true`, then the name is reusable at once.
+- Names match `^[A-Za-z0-9_-]{1,64}$`. Limit: 8 named executors; the default one does not count. The 9th new name is HTTP 409 (`ConflictError`) with body `{ code, executors, message }`. Delete one with `close_tab: true`, then the name is reusable at once.
 - **Memory decides first.** On the default 1 GiB headless VM each executor costs about 110-150 MB, and from the 5th on `execute` fails with HTTP 500 ("open tab ... failed to connect to devtools" or "not ready within 5s"), then hangs. That is memory exhaustion, not the limit. Headless accepts `memory` of `'1GiB' | '2GiB' | '4GiB'`; with `'4GiB'` all 8 succeeded. Use `'4GiB'` for more than about 3 executors (2 GiB: untested). Headful: 8 GiB default, 16 GiB per docs (untested).
-- A failed setup leaves a zombie entry in `executors.list`; after starving, even `delete` takes about 10 s. Prevent it with memory rather than repair it.
+- A failed setup leaves a zombie entry in `executors.list`; after starving, even `delete` takes about 10 s. Prevent it with memory.
 - `executors.delete('default', ...)` restarts the default executor (docs, untested).
 
 **Avoid** N browsers loaded from stale profile copies for one user, and reusing an executor name without deleting its tab first. **Source** https://www.kernel.sh/docs/browsers/parallel-task-execution, https://www.kernel.sh/docs/browsers/playwright-execution#executors.
@@ -126,21 +128,21 @@ await kernel.browsers.playwright.executors.delete('lane-1', { id_or_name: browse
 **If** a selector fails, the target is a canvas, a drag needs real pointer movement, or a native dialog is up -> **Do** use `kernel.browsers.computer.*` for that step, then go back to Playwright. Methods: `captureScreenshot`, `clickMouse`, `moveMouse`, `dragMouse`, `typeText`, `pressKey`, `scroll`, `getMousePosition`, `readClipboard`, `writeClipboard`, `setCursorVisibility`, `batch`.
 
 ```ts
-const resp = await kernel.browsers.computer.captureScreenshot(id); // a fetch Response
+const resp = await kernel.browsers.computer.captureScreenshot(id, undefined, { maxRetries: 0, timeout: 15_000 }); // a fetch Response
 const png = Buffer.from(await resp.arrayBuffer());                 // starts 89504e47...
-await kernel.browsers.computer.clickMouse(id, { x: 420, y: 280 }); // x/y are placeholders
-await kernel.browsers.computer.typeText(id, { text: '123' });
-await kernel.browsers.computer.pressKey(id, { keys: ['Ctrl+a', 'Delete'] });
+const once = { maxRetries: 0, timeout: 15_000 }; // an ambiguous retry would act twice
+await kernel.browsers.computer.clickMouse(id, { x: 420, y: 280 }, once); // x/y are placeholders
+await kernel.browsers.computer.typeText(id, { text: '123' }, once);
+await kernel.browsers.computer.pressKey(id, { keys: ['Ctrl+a', 'Delete'] }, once);
 ```
-(composite of live calls; each call ran ok, the combined block and coordinates did not)
+(composite of live calls; each ran ok, the combined block did not)
 
 Traps, all measured live:
 - **Keys are an array of strings, one press per item.** `keys: 'Ctrl+a'` is a 400 (and a TS error). `['Ctrl', 'a']` taps Ctrl and then types `a`: no select-all. A chord is one item (`'Ctrl+a'`, `'ctrl+a'`; multi-modifier chords like `'Ctrl+Shift+Tab'` are docs-only, untested); a sequence is several (`['Ctrl+a', 'Delete']`). `Return` and `Enter` both work. Ctrl, not Cmd (Linux VM). `hold_keys` and `duration` exist in the types (untested).
 - **Silent no-ops.** If focus is on `BODY`, `clickMouse`, `typeText` and `pressKey` all return ok and do nothing. After each step read DOM state (`document.activeElement`, an input's value) through `playwright.execute`.
 - **Coordinates are screen pixels, not page pixels.** Headful 1920x1080: page y = screen y - 87. The `outerHeight - innerHeight` guess (57) lands 30 px high. Calibrate once: add a `mousedown` listener, click, and compare `clientX/Y` with `screenX/Y`.
 - `typeText` is typed as `{ text, delay? }` only. The live API also accepted `smooth: false` and `typo_chance` (HTTP 200), but the SDK types reject them (TS2353), so they need a cast: `{ text, smooth: false } as any` (untested for effect; only acceptance was checked). Docs: `delay` applies only when `smooth` is false. The REST path is `/computer/type`.
-- Computer calls return ok on a headless browser too (screenshot, click, key); whether the click or key changed the page there was not checked.
-- Cap attempts per risky Playwright tool, then hand over; do not loop both surfaces on one step. Hand-off patterns: https://www.kernel.sh/docs/browsers/playwright-computer-use-fallback.
+- Cap attempts per risky Playwright tool, then hand over; do not loop both surfaces on one step (https://www.kernel.sh/docs/browsers/playwright-computer-use-fallback).
 - Docs claim computer controls leave no CDP fingerprint (https://www.kernel.sh/docs/introduction/control). Site-specific and not tested here; test on the target before committing.
 - CLI: `kernel browsers computer screenshot <id> --to shot.png` (verified live); `press-key <id> --key Ctrl+t` (docs, untested).
 
@@ -177,17 +179,18 @@ if (t) {
 **If** an agent should define a helper once and call it over many turns -> **Do** use `kernel.browsers.repl`; set `timeout_sec` above your longest cell:
 
 ```ts
-await kernel.browsers.repl(id, { code: "var tmpX = 42; function tmpFn() { return 'h!'; } repl.write('set');" });
-const r = await kernel.browsers.repl(id, { code: 'repl.write(String(tmpX) + tmpFn());' });
+const opts = { maxRetries: 0, timeout: 70_000 }; // above timeout_sec (default 60)
+await kernel.browsers.repl(id, { code: "var tmpX = 42; function tmpFn() { return 'h!'; } repl.write('set');" }, opts);
+const r = await kernel.browsers.repl(id, { code: 'repl.write(String(tmpX) + tmpFn());' }, opts);
 // r.content: [{ type: 'text', channel: 'write', text: '42h!' }]
 ```
-(ran live, trimmed.)
+(ran live, trimmed)
 
 - Result: `success`, `content[]` (items with `channel` `write | stdout | stderr` and `text`), `repl_id`, `duration_ms`, `content_truncated`; on failure also `error`, `stack`, `repl_terminated`. Request: `{ code, reset?, timeout_sec? }`; `timeout_sec` default 60, max 300 (docs).
 - **A call that exceeds `timeout_sec` destroys the REPL.** Measured: `timeout_sec: 2` on an 8 s wait gave `success: false`, `repl_terminated: true`, "execution timed out after 2000ms"; the next call had a new `repl_id` and `typeof tmpX === 'undefined'`. After any `repl_terminated`, redeclare every helper. `reset: true` gives a fresh REPL in the same call.
 - Ordinary exceptions and Chromium restarts keep the state. Calls are serialized. JavaScript only: no TypeScript, no static `import`.
 - Built-in helpers (docs, not run live): `gotoUrl`, `click`, `fillInput`, `waitForElement`, `waitForLoad`, `accessibilitySnapshot`, `js`, `cdp`, `captureScreenshot`, `uploadFile`, `webmcp`. Call `repl.help` to list them. Call `waitForLoad()` before a snapshot.
-- The REPL is unrestricted code execution in the VM (files, env, network, CDP). Send only code you wrote; never build `code` from page content, and keep secrets out of the VM environment. Set `{ maxRetries: 0 }` and a client timeout above `timeout_sec`.
+- The REPL is unrestricted code execution in the VM (files, env, network, CDP). Send only code you wrote; never build `code` from page content, and keep secrets out of the VM environment.
 
 **Avoid** a timeout shorter than the cell, retrying a REPL call, and treating page text as code. **Source** https://www.kernel.sh/docs/browsers/repl, https://www.kernel.sh/docs/browsers/code-mode-webmcp.
 
@@ -197,10 +200,10 @@ const r = await kernel.browsers.repl(id, { code: 'repl.write(String(tmpX) + tmpF
 
 ```ts
 const dec = (s?: string) => Buffer.from(s ?? '', 'base64').toString();
-const r = await kernel.browsers.process.exec(id, { command: 'sh', args: ['-c', 'node --version'], timeout_sec: 30 });
+const r = await kernel.browsers.process.exec(id, { command: 'sh', args: ['-c', 'node --version'], timeout_sec: 30 }, { maxRetries: 0, timeout: 40_000 });
 console.log(r.exit_code, dec(r.stdout_b64)); // 0 v22.x (the VM is Linux x86_64 with Node preinstalled)
 
-const sp = await kernel.browsers.process.spawn(id, { command: 'sh', args: ['-c', 'echo tick; sleep 2; echo tock'] });
+const sp = await kernel.browsers.process.spawn(id, { command: 'sh', args: ['-c', 'echo tick; sleep 2; echo tock'] }, { maxRetries: 0, timeout: 15_000 });
 const stream = await kernel.browsers.process.stdoutStream(sp.process_id!, { id_or_name: id });
 for await (const c of stream) console.log(c.stream ?? c.event, c.exit_code ?? dec(c.data_b64)); // ends with event "exit"
 ```
@@ -223,16 +226,23 @@ const r = await kernel.browsers.curl(id, { url: 'https://example.com/file.bin', 
 const bytes = Buffer.from(r.body, 'base64'); // r.status is the HTTP status
 ```
 
-**If** a click downloads a file -> **Do** click with no download setup, poll the default folder, read the bytes **before** you delete the browser:
+**If** a click downloads a file -> **Do** snapshot the folder first, click with no download setup, poll for a new finished file, read the bytes **before** you delete the browser:
 
 ```ts
 const dir = '/home/kernel/Downloads';
+const ls = () => kernel.browsers.fs.listFiles(id, { path: dir }).then((f) => f ?? [], // null when empty
+  (e) => { if (e instanceof Kernel.NotFoundError) return []; throw e; }); // folder not created yet
+const before = new Set((await ls()).map((f) => f.name));
+// ... click that starts the download ...
 let name = '';
 for (let i = 0; i < 150 && !name; i++) {
-  const files = (await kernel.browsers.fs.listFiles(id, { path: dir })) ?? []; // null when empty
-  name = files.find((f) => !f.name.endsWith('.crdownload') && f.size_bytes > 0)?.name ?? '';
+  const files = await ls();
+  const fresh = files.filter((f) => !before.has(f.name));
+  const done = fresh.length > 0 && fresh.every((f) => !f.name.endsWith('.crdownload')); // wait for the whole batch
+  name = done ? (fresh.find((f) => f.size_bytes > 0)?.name ?? '') : '';
   if (!name) await new Promise((r) => setTimeout(r, 100));
 }
+if (!name) throw new Error('download did not finish');
 const resp = await kernel.browsers.fs.readFile(id, { path: `${dir}/${name}` });
 const bytes = Buffer.from(await resp.arrayBuffer());
 ```
@@ -241,9 +251,8 @@ const bytes = Buffer.from(await resp.arrayBuffer());
 - **File URL only discoverable on a page.** Read the link inside `playwright.execute` (`new URL(await page.locator('a').first().getAttribute('href'), page.url()).href`, resolved against `page.url()`), return it, then fetch it with the `browsers.curl` path above.
 - **Bytes from inside the VM to your machine.** `fs.readFile` (above) for files on the VM disk. For bytes you already hold in `playwright.execute` code, return them as base64 in `result` (ran live: `const resp = await context.request.get(href); const body = await resp.body(); return { status: resp.status(), base64: body.toString('base64') }`, then `Buffer.from(out.base64, 'base64')` locally, 36 bytes). No size limit is documented or measured here; large files: use `fs.readFile`. Take the file name from the page only through `path.basename`, and refuse `''`, `.` and `..`.
 - **Never `fs.createDirectory` the download folder.** It makes root-owned directories (`mode` has no visible effect); Chromium runs as user `kernel`, cannot write there, and cancels the download. Symptom: the folder stays empty, `listFiles` returns null. In-VM `download.saveAs(...)` also failed with "canceled".
-- Default folder `/home/kernel/Downloads` does not exist until Chromium makes it; a missing folder throws 404 "directory not found". An empty existing folder returns `null`, not `[]`: use `?? []`.
+- Default folder `/home/kernel/Downloads` does not exist until Chromium makes it: 404 "directory not found" (the poll above treats it as empty). An empty folder returns `null`. `.crdownload` marks an in-progress file (docs; not seen for the 36-byte test).
 - A custom folder works only if user `kernel` owns it: `process.exec(id, { command: 'sh', args: ['-c', 'mkdir -p /tmp/dl'], as_user: 'kernel' })`, then raw CDP `Browser.setDownloadBehavior { behavior: 'allow', downloadPath, eventsEnabled: true }` from a CDP client (confirmed with `puppeteer-core`). Programmatic (script-triggered) downloads need that `allow` behavior (docs).
-- `.crdownload` marks an in-progress file (docs); not observed for the 36-byte test.
 
 **If** a page needs an upload (a file into an `<input type=file>`) -> **Do** `setInputFiles` inside `playwright.execute`, not `fs.*`. The browser runs in the VM, so a local path means nothing there: embed the file contents in the `code` string with `JSON.stringify` and pass an in-memory buffer (ran live):
 
