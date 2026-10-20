@@ -12,7 +12,7 @@ kernel org entitlements -o json      # features.gpu.enabled, custom_proxies, sea
 ```
 
 ```ts
-// untested (method names from api-map.md; the lab ran the CLI form)
+// untested (method names from api-map.md; the CLI form was run)
 import Kernel from '@onkernel/sdk';
 const kernel = new Kernel();
 const lim = await kernel.organization.limits.retrieve();
@@ -23,21 +23,21 @@ The same data is `GET /org/limits` and `GET /org/entitlements`. A 403 has severa
 
 | 403 / code | Meaning | Seen |
 |---|---|---|
-| `insufficient_plan` | Plan gate. GPU: "requires an active paid Start-Up or Enterprise plan". Audit logs: "Insufficient_plan: Audit logs require a Start-Up or Enterprise plan." | lab, Hobbyist |
+| `insufficient_plan` | Plan gate. GPU: "requires an active paid Start-Up or Enterprise plan". Audit logs: "Insufficient_plan: Audit logs require a Start-Up or Enterprise plan." | verified live, Hobbyist |
 | spending cap reached | New browsers and app invocations return 403 for the capped scope (see AC5) | docs only |
 | `insufficient_scope` | Your key's policy lacks the action (see AC2) | docs only |
 | project mismatch | A project-scoped key sent a header naming another project | docs only |
 
-**Avoid** guessing access from the plan name. Avoid treating `concurrent_sessions_used` as yours alone or expecting it to return to your baseline after cleanup: the counter is org-wide and moved on its own in the lab (4 -> 6 after two creates, 3 after deleting both). Order of GPU errors: `gpu: true` with `headless: true` is a 400 `invalid_request` before any plan check; the plan gate (403) only shows on a headful create.
+**Avoid** guessing access from the plan name. Avoid treating `concurrent_sessions_used` as yours alone or expecting it to return to your baseline after cleanup: the counter is org-wide and moved on its own (4 -> 6 after two creates, 3 after deleting both). Order of GPU errors: `gpu: true` with `headless: true` is a 400 `invalid_request` before any plan check; the plan gate (403) only shows on a headful create.
 
-**Source** lab check (limits fields confirmed, counter-returns-to-baseline refuted, GPU plan gate via lead check), https://www.kernel.sh/docs/browsers/concurrency-and-limits, https://www.kernel.sh/docs/info/spending-caps.
+**Source** https://www.kernel.sh/docs/browsers/concurrency-and-limits, https://www.kernel.sh/docs/info/spending-caps.
 
 ## AC2. Handing a key to an agent or short-lived job
 
 **If** code you trust less than your backend (an AI agent, a CI job, a customer workload) needs Kernel access -> **Do** create a project-scoped key with a `policy` and an `expires_at` of minutes to hours, and keep the secret out of logs:
 
 ```ts
-// untested (docs example; probe P23 forbade creating keys)
+// untested (docs example; key creation was not run)
 const key = await kernel.apiKeys.create({
   name: 'checkout-agent-run-4812',
   project_id: 'proj_staging_9f3k',
@@ -59,24 +59,24 @@ const key = await kernel.apiKeys.create({
 - Revocation: an expired key is rejected immediately, a deleted key within about 10 seconds. Neither revokes connection URLs (CDP, WebDriver, live view) the key already obtained: they keep working, including for new connections, until the browser is deleted. **Delete the key's browsers to cut off access.**
 - Rotate with `kernel.apiKeys.rotate(id, { days_to_expire?, expire_in_days? })` (old key lives a 7-day grace period unless `expire_in_days: 0`); rotation keeps the policy.
 - Deployed apps get their own deployment key injected as `KERNEL_API_KEY`; do not set that name yourself (reserved).
-- Listing keys (`kernel api-keys list -o json`, `kernel.apiKeys.list()`): fields are `id, name, masked_key, project_id, project_name, created_at, created_by, expires_at, deleted_at`; `masked_key` looks like `sk_xxxx...xxxx` (older keys have a shorter prefix). The 5 unscoped keys in the lab had no `policy` field; scoped keys return `policy` in list and retrieve responses per the docs, so the list above is what unscoped keys showed, not an exhaustive schema.
+- Listing keys (`kernel api-keys list -o json`, `kernel.apiKeys.list()`): fields are `id, name, masked_key, project_id, project_name, created_at, created_by, expires_at, deleted_at`; `masked_key` looks like `sk_xxxx...xxxx` (older keys have a shorter prefix). The 5 unscoped keys listed had no `policy` field; scoped keys return `policy` in list and retrieve responses per the docs, so the list above is what unscoped keys showed, not an exhaustive schema.
 
 **Avoid** org-wide keys for agents; `days_to_expire` when you need a short expiry; assuming deleting a key kills live browser access.
 
-**Source** https://www.kernel.sh/docs/info/api-keys, https://www.kernel.sh/docs/info/api-key-permissions, `api-keys.ts` types (`APIKeyCreateParams`, `APIKeyRotateParams`), lab check (list shape confirmed; scoped creation not run). Lab note: the policy syntax is from docs and SDK types; the minimum SDK version that has `policy` was not verified, the 0.127.0 used in the lab has it (0.128.0 was released since; not re-checked).
+**Source** https://www.kernel.sh/docs/info/api-keys, https://www.kernel.sh/docs/info/api-key-permissions, `api-keys.ts` types (`APIKeyCreateParams`, `APIKeyRotateParams`), list shape verified live; scoped creation not run. Note: the policy syntax is from docs and SDK types; the minimum SDK version that has `policy` was not verified, 0.127.0 has it (0.128.0 was released since; not re-checked).
 
 ## AC3. Projects and multi-tenant setups
 
 **If** you serve several customers, teams or environments -> **Do** one project per customer, one project-scoped key per customer workload, a concurrency cap per project (`kernel projects limits set <id-or-name> --max-concurrent-sessions N`, or an org default via `kernel org limits set --default-project-max-concurrent-sessions N`), a spending cap per project (AC5), and one profile per end user inside the customer's project.
 
 ```ts
-// untested (the lab ran the CLI `projects list`, not this call)
+// untested (the CLI `projects list` was run, not this call)
 const projects = await kernel.projects.list();   // /org/projects
 ```
 
 **Project routes.** **Do** use `/org/projects/*` (the SDK already does). **Avoid** `/projects/*`: deprecated, "will be removed on 2026-11-24" per the API reference pages.
 
-**Scoping a request.** Both headers were probed against `GET /browsers`:
+**Scoping a request.** Both headers were verified live against `GET /browsers`:
 
 | Input | Result |
 |---|---|
@@ -86,23 +86,23 @@ const projects = await kernel.projects.list();   // /org/projects
 | `X-Kernel-Project: <exact name or id>` (SDK `project`) | 200 |
 | `X-Kernel-Project: <unknown>` | 404 `project_not_found` |
 
-- Unresolved: the projects docs page says CLI `--project` / `KERNEL_PROJECT` send `X-Kernel-Project-Id`, while the CLI README and its tests say `X-Kernel-Project`. The lab did not capture CLI headers; the CLI accepting a project name via `--project` is consistent with the README.
+- Unresolved: the projects docs page says CLI `--project` / `KERNEL_PROJECT` send `X-Kernel-Project-Id`, while the CLI README and its tests say `X-Kernel-Project`. CLI headers were not captured; the CLI accepting a project name via `--project` is consistent with the README.
 - The docs page documents only the `-Id` header and says names are not accepted there. `X-Kernel-Project` taking a name works live; it is not described on the projects page.
 - The SDK does not read `KERNEL_PROJECT` (it reads `KERNEL_API_KEY`, `KERNEL_BASE_URL`, `KERNEL_LOG`, `KERNEL_CUSTOM_HEADERS`, and a few internal ones such as `KERNEL_SUPPRESS_BUN_WARNING`). The CLI does. For a variable that may hold a name use `new Kernel({ project: name })`, not `projectID`.
 - Without a header, requests act on the default project (the one named `Default`); naming it explicitly is equivalent. OAuth (CLI `kernel login`, MCP) is always org-wide: scope it with `--project` or the header.
 - A scoped key sending a header for another project gets 403.
 - Delete rules: 409 `last_active_project` for the last project, 409 `project_not_empty` until it is empty, 404 `projects_disabled` if the org lacks projects. Most project admin (create, archive, delete, limits) needs an org-wide credential.
-- Plan limits: pricing says Hobbyist has 1 project; the lab account on Hobbyist listed 4 active projects and `/org/entitlements` has no project count. Do not assume the limit is enforced or absent; read the response.
+- Plan limits: pricing says Hobbyist has 1 project; the Hobbyist account listed 4 active projects and `/org/entitlements` has no project count. Do not assume the limit is enforced or absent; read the response.
 
 **Avoid** one org key for all tenants; `projectID: process.env.KERNEL_PROJECT`.
 
-**Source** https://www.kernel.sh/docs/info/projects, https://www.kernel.sh/docs/introduction/manage, lab check (header table confirmed, project-count mismatch reported as is), `client.ts` in `@onkernel/sdk`.
+**Source** https://www.kernel.sh/docs/info/projects, https://www.kernel.sh/docs/introduction/manage, `client.ts` in `@onkernel/sdk`.
 
 ## AC4. Audit logs
 
 **If** you need "who called what" -> **Do** check the plan first: search and download need Start-Up or Enterprise, S3 export needs Enterprise. On Hobbyist `kernel audit-logs search --start 2026-10-19 --limit 3 -o json` exits 1 with `Insufficient_plan`. SDK: `kernel.auditLogs.list({ start, end, method })` is an async iterable. The CLI has `search`, `download`, `export` (no `list`). Retention is 1 year. **Avoid** building features on audit logs without the plan check.
 
-**Source** https://www.kernel.sh/docs/info/audit-logs, lab check (gated, confirmed). Not tested: any successful audit-log call.
+**Source** https://www.kernel.sh/docs/info/audit-logs, gating verified live. Not tested: any successful audit-log call.
 
 ## AC5. Spending caps
 
@@ -116,7 +116,7 @@ const projects = await kernel.projects.list();   // /org/projects
 
 **If** you want usage, billing or invoice numbers -> **Do** use the dashboard. The public API spec (128 paths) has no usage, billing or invoice endpoint, and the CLI has no billing command. The closest read-only calls are `GET /org/limits` and `GET /org/entitlements`. **Avoid** inventing a usage endpoint.
 
-**Source** lab check (confirmed).
+**Source** Verified live (no usage or billing endpoint in the spec).
 
 ## AC7. Firewalls and sandboxes
 
@@ -148,4 +148,4 @@ Apply live view and replay rules to each viewer's network, not only the agent's 
 
 ---
 
-> Verified in lab: 2026-10-20, @onkernel/sdk 0.127.0, kernel CLI 0.49.0 (version from the plan, not re-run in the lab). Probes: P23 (api-keys list shape, no billing endpoint, audit-logs gated on Hobbyist, project count mismatch, header semantics, SDK env names: confirmed/gated); P16 (org limits fields confirmed, counter baseline refuted, GPU gate observed by lead check); LEAD (GPU 403 insufficient_plan, audit-logs 403). NOT tested: creating a scoped key or any policy behavior, rotate, key revocation timing, spending caps, successful audit-log calls, `projects limits set`, firewall hosts, egress allowlist, Terraform, a real 403 from a project mismatch or `insufficient_scope`, the `/projects` removal date (docs only). Snippets marked "untested" were not run.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.

@@ -122,6 +122,8 @@ Only the vault and search tools are gated by entitlement; the server fetches `/o
 
 See `references/does-not-exist.md`. The usual hallucinations: `browsers.delete`, `browsers.get`, `apps.create`, `kernel auth status`, `kernel create` templates not in `kernel create --help`.
 
-## Verified in lab
+## Verified live
 
-Verified: 2026-10-20 against `@onkernel/sdk` 0.127.0 types and source (0.128.0 diff reviewed), `kernel` CLI 0.49.0 `--help`, MCP server source at commit 5c0e58b. Live checks so far: `browsers.create/retrieve/deleteByID`, `playwright.execute` shapes, `auth context`, audit-log gating (probes P01, P23). Not yet verified live and marked as such where used: REST routes for most resources, MCP tool behavior beyond `initialize`.
+Checked against `@onkernel/sdk` 0.127.0 types and source (0.128.0 diff reviewed), `kernel` CLI 0.49.0 `--help`, MCP server source at commit 5c0e58b. Live checks so far: `browsers.create/retrieve/deleteByID`, `playwright.execute` shapes, `auth context`, audit-log gating. Not yet verified live and marked as such where used: REST routes for most resources, MCP tool behavior beyond `initialize`.
+
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.

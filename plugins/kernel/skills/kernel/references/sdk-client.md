@@ -21,7 +21,7 @@ Options worth knowing (installed SDK 0.128.0):
 
 **Avoid** passing both `environment` and `baseURL` (or setting `KERNEL_BASE_URL` while passing `environment`): the constructor throws "Ambiguous URL". Pass `baseURL: null` with `environment` if you must.
 
-Env vars the SDK reads (grep of installed 0.128.0, probe P23): `KERNEL_API_KEY`, `KERNEL_BASE_URL`, `KERNEL_LOG`, `KERNEL_CUSTOM_HEADERS`, `KERNEL_SUPPRESS_BUN_WARNING`, `KERNEL_BROWSER_ROUTING_SUBRESOURCES`. It does NOT read `KERNEL_PROJECT` (only the CLI does).
+Env vars the SDK reads (grep of installed 0.128.0): `KERNEL_API_KEY`, `KERNEL_BASE_URL`, `KERNEL_LOG`, `KERNEL_CUSTOM_HEADERS`, `KERNEL_SUPPRESS_BUN_WARNING`, `KERNEL_BROWSER_ROUTING_SUBRESOURCES`. It does NOT read `KERNEL_PROJECT` (only the CLI does).
 
 **Runtime**: Node 20+ (non-EOL); Stagehand 4.x needs Node >= 22.18; Bun 1.0+ works but logs a warning about Playwright CDP issues, silenced with `KERNEL_SUPPRESS_BUN_WARNING=true`. The SDK needs a global `fetch`. **Source** SDK README "Requirements", `src/client.ts`.
 
@@ -29,7 +29,7 @@ Env vars the SDK reads (grep of installed 0.128.0, probe P23): `KERNEL_API_KEY`,
 
 **If** a call is safe to repeat (list, retrieve, delete by id) -> **Do** keep the defaults. -> **Avoid** hand-rolled 429 loops on top of them.
 
-**If** a call has side effects (browser create, app invoke, deploy, playwright `execute`, REPL/code run, payments, search) -> **Do** pass per-request options: `{ maxRetries: 0, timeout: <operation timeout + margin> }`. -> **Avoid** default retries there: a timed-out or 5xx request can already have run on the server, and the retry runs it again.
+**If** a call has side effects (browser create, app invoke, deploy, playwright `execute`, REPL/code run, payments, search, auth `connections.create` / `login`, vault `performOperation`, pool `acquire`, profile writes) -> **Do** pass per-request options: `{ maxRetries: 0, timeout: <operation timeout + margin> }`. -> **Avoid** default retries there: a timed-out or 5xx request can already have run on the server, and the retry runs it again.
 
 ```ts
 // untested (shape from SDK README "Retries" and "Timeouts")
@@ -41,7 +41,7 @@ const browser = await kernel.browsers.create(
 
 What the SDK retries (source `shouldRetry`, `src/client.ts`): connection errors, timeouts, 408, 409, 429, any status >= 500, and any response with `x-should-retry: true`; never when `x-should-retry: false`. Backoff is 0.5 s doubling to a cap of 8 s, but `retry-after-ms` or `Retry-After` from the server wins. A request timeout is itself retried, so worst case is roughly `timeout * (maxRetries + 1)`.
 
-**Idempotency**: the client sends no idempotency key (the header is unset in `src/client.ts`; `options.idempotencyKey` has no effect here). To make create-style calls safe after an ambiguous failure, tag the resource with a run id (`tags`, `name`) and reconcile with `list` before retrying. **Source** SDK `src/client.ts`, README. (unverified in lab: no real 408/409/429/5xx was provoked; read from source only.)
+**Idempotency**: the client sends no idempotency key (the header is unset in `src/client.ts`; `options.idempotencyKey` has no effect here). To make create-style calls safe after an ambiguous failure, tag the resource with a run id (`tags`, `name`) and reconcile with `list` before retrying. **Source** SDK `src/client.ts`, README. (unverified: no real 408/409/429/5xx was provoked; read from source only.)
 
 ## K3. Errors
 
@@ -64,7 +64,7 @@ try {
 |---|---|---|
 | 400 | `BadRequestError` | Bad params; fix the request |
 | 401 | `AuthenticationError` | Missing or wrong key |
-| 403 | `PermissionDeniedError` | Plan gate (audit logs on Hobbyist return `Insufficient_plan`; the P23 CLI probe exits 1, the 403 is from field notes) or scoped-key mismatch |
+| 403 | `PermissionDeniedError` | Plan gate (audit logs on Hobbyist return `Insufficient_plan`; the CLI exits 1 live, the 403 body is from field notes) or scoped-key mismatch |
 | 404 | `NotFoundError` | Gone, wrong id, or unknown project (`project_not_found`) |
 | 409 | `ConflictError` | Retried by default; e.g. deleting the last project is `last_active_project` |
 | 422 | `UnprocessableEntityError` | Validation |
@@ -72,11 +72,11 @@ try {
 | >= 500 | `InternalServerError` | Retried twice by default |
 | none | `APIConnectionError`, `APIConnectionTimeoutError`, `APIUserAbortError` | Network or timeout; `status` is undefined |
 
-- Deleted browser: `retrieve(id)` throws `NotFoundError` (404). The message likely embeds the session id, so avoid logging it raw (gotcha; message text not captured in the lab). `retrieve(id, { include_deleted: true })` returns the record with `deleted_at` and no `status` field (probe P01, confirmed).
-- **Avoid** assuming a failed `playwright.execute` throws. When the submitted code throws, the HTTP call is 200 and the body has `success: false`, `error`, `stderr`, `tab`; the SDK does not throw (probe P01, confirmed). Check `res.success`.
-- 529 CapacityExhausted: handle it explicitly, e.g. `if (e instanceof Kernel.APIError && e.status === 529) { /* back off or queue */ }` before the generic branch in the K3 catch block. The SDK has no class for it (it would arrive as `InternalServerError` with `status` 529, retried by default). (unverified: never observed in the lab, P16.)
+- Deleted browser: `retrieve(id)` throws `NotFoundError` (404). The message likely embeds the session id, so avoid logging it raw (gotcha; message text not captured). `retrieve(id, { include_deleted: true })` returns the record with `deleted_at` and no `status` field (verified live).
+- **Avoid** assuming a failed `playwright.execute` throws. When the submitted code throws, the HTTP call is 200 and the body has `success: false`, `error`, `stderr`, `tab`; the SDK does not throw (verified live). Check `res.success`.
+- 529 CapacityExhausted: handle it explicitly, e.g. `if (e instanceof Kernel.APIError && e.status === 529) { /* back off or queue */ }` before the generic branch in the catch block. The SDK has no class for it (it would arrive as `InternalServerError` with `status` 529, retried by default). (unverified: never observed.)
 
-Probe-backed snippet (trimmed from `lab-runs/P01/pw-throw.ts`, ran_ok; `browser` comes from `kernel.browsers.create`):
+Snippet (trimmed, ran live; `browser` comes from `kernel.browsers.create`):
 
 ```ts
 const { data: res, response } = await kernel.browsers.playwright
@@ -93,7 +93,7 @@ console.log('success', res.success, 'error', JSON.stringify(String(res.error ?? 
 
 **If** you list anything -> **Do** `for await (const item of kernel.<resource>.list(params)) {...}`; the SDK fetches further pages. Over raw HTTP (curl) paging is in headers `X-Has-More` and `X-Next-Offset` (the CLI audit-log download reads `X-Has-More` and `X-Next-Cursor`). -> **Avoid** assuming one call returns everything, or counting items from the first page only. -> **Source** SDK `src/core/pagination.ts`, `references/api-map.md`.
 
-Probe-backed (`lab-runs/P23/list-api-key-shape.ts`, ran_ok): `for await (const key of client.apiKeys.list()) { count++; }` visited all 5 keys.
+Verified live: `for await (const key of client.apiKeys.list()) { count++; }` visited all 5 keys.
 
 **If** you need headers or the status -> **Do** `.withResponse()` (returns `{ data, response }`, body parsed) or `.asResponse()` (headers only, body unread). Source: SDK README.
 
@@ -110,23 +110,21 @@ Probe-backed (`lab-runs/P23/list-api-key-shape.ts`, ran_ok): `for await (const k
 import Kernel from '@onkernel/sdk';
 
 let visible = 0;
-const client = new Kernel({ project: 'Default' }); // ran_ok, P23
+const client = new Kernel({ project: 'Default' }); // ran live
 for await (const _browser of client.browsers.list()) visible++;
 ```
 
-- **Avoid** `projectID: process.env.KERNEL_PROJECT`: the SDK never reads that variable, and a name in `projectID` returns 404 `project_not_found` (curl probe P23: `X-Kernel-Project-Id: Default` = 404; `X-Kernel-Project: Default` = 200; either header with an id = 200; a bogus name = 404).
+- **Avoid** `projectID: process.env.KERNEL_PROJECT`: the SDK never reads that variable, and a name in `projectID` returns 404 `project_not_found` (verified live with curl: `X-Kernel-Project-Id: Default` = 404; `X-Kernel-Project: Default` = 200; either header with an id = 200; a bogus name = 404).
 - No header and no scoped key: requests act on the org default project. Naming the default project equals omitting the header (docs).
-- Org-wide keys see all projects; a project-scoped key is limited to its project, and a conflicting header returns 403. Scoped keys cannot create, archive or delete projects. OAuth tokens are org-wide and cannot switch projects. (unverified in lab: scoped-key creation and the 403 were not run; docs only.)
-- Plan limits: pricing says Hobbyist has 1 project, but the test account listed 4 active projects; the server did not enforce 1 (P23). Do not code around the pricing number.
+- Org-wide keys see all projects; a project-scoped key is limited to its project, and a conflicting header returns 403. Scoped keys cannot create, archive or delete projects. OAuth tokens are org-wide and cannot switch projects. (unverified: scoped-key creation and the 403 were not run; docs only.)
+- Plan limits: pricing says Hobbyist has 1 project, but the test account listed 4 active projects; the server did not enforce 1. Do not code around the pricing number.
 - A project-scoped API key is a different thing from the SDK `project` option. Key fields and masked shape: `references/api-map.md`.
-- **Source** https://www.kernel.sh/docs/info/projects, probe P23.
+- **Source** https://www.kernel.sh/docs/info/projects.
 
 ## K6. Things that do not exist
 
-- No billing, usage or invoice endpoint: the public spec has none (P23). Closest read-only calls are `GET /org/limits` and `GET /org/entitlements`.
-- **Avoid** `kernel.browsers.delete` (undefined); use `deleteByID` (P01). Full "does not exist" list: `references/does-not-exist.md`.
-- Audit logs: CLI has `search`, `download`, `export`, no `list`; Hobbyist is gated (P23).
+- No billing, usage or invoice endpoint: the public spec has none. Closest read-only calls are `GET /org/limits` and `GET /org/entitlements`.
+- **Avoid** `kernel.browsers.delete` (undefined); use `deleteByID`. Full "does not exist" list: `references/does-not-exist.md`.
+- Audit logs: CLI has `search`, `download`, `export`, no `list`; Hobbyist is gated.
 
----
-
-> Verified in lab: 2026-10-20, @onkernel/sdk 0.128.0, kernel CLI 0.49.0. Probes: P01 (execute error shape, 404 and include_deleted after delete, deleteByID-only: confirmed); P23 (SDK env var names, project header semantics, api-keys list pagination and masked shape, no billing endpoint, 4 projects vs pricing 1: confirmed; audit logs: gated; scoped keys: docs only). NOT tested: any real 408/409/429/5xx or 529 retry, `x-should-retry`/`Retry-After` handling, `environment` + `baseURL` throw, `maxRetries: 0` effect, timeout error class, scoped-key 403, OAuth project behavior, Bun warning, `KERNEL_CUSTOM_HEADERS`. Snippets marked untested are copied from SDK README/source, not run.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.

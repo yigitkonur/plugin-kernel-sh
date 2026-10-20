@@ -93,6 +93,7 @@ Traps in the data:
 - Uncaught JS errors arrive as `console_error`. There is no `page_error` event.
 - `page.goto` to an unresolvable host does not throw. The signal is `page_navigation` events plus a 502 `network_response` on `/favicon.ico`, not a `network_loading_failed` for the document.
 - A page `fetch` that returned HTTP 500 shows as `network_loading_failed` with `net::ERR_ABORTED` (canceled), not as a `network_response` 500. Do not read it as a network outage.
+- The reverse also holds: a document-level `ERR_ABORTED` can mean a failed navigation to an HTTP error page (a top-level `goto` to a 500 gave no `page_navigation`, only this), not only a canceled fetch. Check the failing URL and the caller's error before choosing.
 - Most `network_loading_failed` rows can be `target_type: service_worker` calls to a Kernel-internal endpoint. The filter above keeps only `page` targets.
 - `monitor_disconnected` means the collector dropped; treat events until `monitor_reconnected` as incomplete.
 
@@ -105,8 +106,8 @@ Map signal to likely cause (state it as "likely", cite the event `seq`):
 | `proxy_error` | Proxy path failed (a classification of branded 502/403 responses, only with network telemetry on; not a complete record of proxy refusals) | `proxy: { mode: 'direct' }` to isolate, or fix the proxy: ../kernel/references/unblock.md |
 | `network_response` 403 with `X-Kernel-Proxy-Error: network_policy_denied` | Blocked by `network.allowed_hosts` (header seen on `page.goto` and `browsers curl` responses, not checked on telemetry events) | Add the host to the allow list |
 | `ran_s` near `timeout_seconds`, last `cdp_disconnect` then silence | Idle timeout reaped the browser | Raise `timeout_seconds`, keep the client connected or delete explicitly: ../kernel/references/browsers.md |
-| `api_call` for `ExecutePlaywrightCode` returned HTTP 200 but the run died in its own code (`playwright.execute` gave `success:false`) | Failure in the caller's code. The error text is only in the caller's result (`result.error`), not in telemetry (observed in lab: it was absent) | Ask for or read the run's output or logs; then fix or catch the error inside the Playwright code |
-| `page_navigation` events end, then an `execute` failure, after a top-level `page.goto` to a URL that answers HTTP 500 | Playwright `goto` threw `net::ERR_HTTP_RESPONSE_CODE_FAILURE` (observed in lab with `https://httpbin.org/status/500`; the throw text was seen in the caller's result, not in events). Other statuses were not tested | Catch the `goto` error inside the Playwright code and return `{ ok:false, navError }`, or treat the status yourself |
+| `api_call` for `ExecutePlaywrightCode` returned HTTP 200 but the run died in its own code (`playwright.execute` gave `success:false`) | Failure in the caller's code. The error text is only in the caller's result (`result.error`), not in telemetry (observed live: it was absent) | Ask for or read the run's output or logs; then fix or catch the error inside the Playwright code |
+| `page_navigation` events end, then an `execute` failure, after a top-level `page.goto` to a URL that answers HTTP 500 | Playwright `goto` threw `net::ERR_HTTP_RESPONSE_CODE_FAILURE` (observed live with `https://httpbin.org/status/500`, where telemetry showed no `page_navigation`, only a document `network_loading_failed` `ERR_ABORTED`; the throw text was seen in the caller's result, not in events). Other statuses were not tested | Catch the `goto` error inside the Playwright code and return `{ ok:false, navError }`, or treat the status yourself |
 | `ran_s` far below `timeout_seconds`, `cdp_connect` with no `cdp_disconnect` after it | The client deleted the browser explicitly (e.g. `deleteByID` in its `finally`). Telemetry showed no delete `api_call`, so it cannot name the deleter | Find the deleting code path in the user's code; check why it ran early (a thrown error reaching `finally`) |
 | `console_error` after a navigation | Page-side JS failure (the site, not Kernel) | Fix selectors or wait for `page_navigation_settled` before acting |
 | Only `connection`/`control`/`system` events | `console`/`network`/`page` were not enabled | Create with `telemetry` including them: ../kernel/references/observe.md |
@@ -143,6 +144,7 @@ If you get a non-200, wait and retry once. The replay is video only. Report the 
 
 ## 6. Diagnose and propose a fix
 
+0. If the session carries no run-id tag (so you cannot find the caller's code or logs), ask the user for the failing run's output or code path before concluding. Do not guess from telemetry alone.
 1. State the most likely cause in one sentence, with the evidence (event `seq` and type, or a record field).
 2. State what you ruled out and what you could not check (telemetry off, logs unavailable, session already deleted, headless so no replay).
 3. Give one concrete fix for the user's code, in TypeScript with `@onkernel/sdk` when code is needed, and name the reference file to read (../kernel/references/browsers.md, ../kernel/references/unblock.md, ../kernel/references/observe.md, ../kernel/references/control.md). Add the docs URL when one applies: telemetry events https://kernel.sh/docs/browsers/telemetry/categories, replays https://kernel.sh/docs/browsers/replays.
@@ -179,4 +181,4 @@ Next step: <one thing you can run for the user, if any>
 
 Never include Kernel-issued session URLs (CDP, live view, replay, hosted login), keys, cookies or raw event payloads in that report. Docs URLs are fine.
 
-Verified in lab 2026-10-20 on @onkernel/sdk 0.127.0; types re-checked on 0.128.0
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.

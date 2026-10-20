@@ -46,6 +46,7 @@ Shell state does not persist between Bash calls. Note the printed workdir path, 
 - If both resolve to the same `id`, stop and tell the user.
 - Compare `updated_at`. A profile is only written when a browser that had `save_changes: true` is deleted or times out (docs). Closing a Playwright/CDP connection does not save it, so a stale `updated_at` on B often is the answer. Say so in the report.
 - If a get fails with 404, the name or project is wrong; stop and ask.
+- Setting up inputs: a profile is created and saved by a browser created with `--profile-name X --save-changes` and then deleted (see ../kernel/references/profiles.md). A profile that was created but never saved has no archive.
 
 ## 3. Download both
 
@@ -54,7 +55,7 @@ Run now:
 ```bash
 kernel profiles download "$A" --to a   # use the literal names here
 kernel profiles download "$B" --to b
-find a b -maxdepth 2 -type d | sort | head -40
+for s in a b; do echo "$s: $(find "$s" -type f | wc -l) files"; done   # counts only, no names
 ```
 
 - `--to` is an extraction directory, not a filename. The CLI extracts for you; do not run `unzip`, `tar` or `zstd` (CLI source: the default is a zstd tarball, not zip, and it extracts a Chromium user-data layout).
@@ -92,7 +93,7 @@ done
 diff diff/cookies-a.txt diff/cookies-b.txt | head -40
 ```
 
-If the issue names a host, add `WHERE host_key LIKE '%<host>%'`, but only if `<host>` matches `^[A-Za-z0-9.-]+$`; otherwise skip the filter. Flag these vendor cookie names when present on one side only: `_abck`, `bm_sz`, `bm_sv` (Akamai); `__cf_bm`, `cf_clearance` (Cloudflare); `datadome`; `_px*`, `pxvid` (HUMAN); `incap_ses_*`, `visid_incap_*`, `reese84` (Imperva). The SQL output contains names and lengths only.
+If the issue names a host, add `WHERE host_key LIKE '%<host>%'`, but only if `<host>` matches `^[A-Za-z0-9.-]+$`; otherwise skip the filter. Flag these vendor cookie names when present on one side only: `_abck`, `bm_sz`, `bm_sv` (Akamai); `__cf_bm`, `cf_clearance` (Cloudflare); `datadome`; `_px*`, `pxvid` (HUMAN); `incap_ses_*`, `visid_incap_*`, `reese84` (Imperva). The SQL output contains names and lengths only. Noise: analytics cookies (for example `optimizely*`) change on every run (`expires_utc` and lengths), so compare `host_key`+`name` presence, and treat a length difference as meaningful only for the session cookie the user cares about.
 
 **Preferences**:
 ```bash
@@ -179,6 +180,7 @@ Matched surfaces
 Next steps
 - <concrete action, e.g. re-save B by deleting its browser after the page finishes loading>
 
+Storage keys extracted: <n> (files present: <n>)
 Not checked: <surfaces skipped, tools missing>
 Workspace: removed | kept at <path>
 ```

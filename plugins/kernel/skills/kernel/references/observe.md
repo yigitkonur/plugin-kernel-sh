@@ -15,31 +15,40 @@ Pick the tool:
 
 ## O1. Anything you may need to debug
 
-**If** a run could fail in a way you must explain later (any agent run, any unattended job). **Do** create the browser headful, with telemetry for console, network and page on top of the defaults, tagged with a run id, and start a replay before the first action. Stop the replay and delete the browser in `finally`. **Avoid** turning telemetry on after the failure (nothing was captured), and a headless browser when you want a replay (400). **Source** lab P19 `drive.ts`; https://www.kernel.sh/docs/browsers/telemetry/overview
+**If** a run could fail in a way you must explain later (any agent run, any unattended job). **Do** create the browser headful, with telemetry for console, network and page on top of the defaults, tagged with a run id, and start a replay before the first action. Stop the replay and delete the browser in `finally`. **Avoid** turning telemetry on after the failure (nothing was captured), and a headless browser when you want a replay (400). **Source** https://www.kernel.sh/docs/browsers/telemetry/overview
 
 ```ts
-// lab P19 drive.ts; also run as written in dogfood D11 (headful create, replay, playwright.execute, stop, delete)
 import Kernel from '@onkernel/sdk';
 
 const kernel = new Kernel();
-const browser = await kernel.browsers.create({
-  headless: false,
-  timeout_seconds: 300,
-  tags: { run: 'run-123' },
-  telemetry: {
-    enabled: true,
-    browser: { console: { enabled: true }, network: { enabled: true }, page: { enabled: true } },
+const browser = await kernel.browsers.create(
+  {
+    headless: false,
+    timeout_seconds: 300,
+    tags: { run: 'run-123' },
+    telemetry: {
+      enabled: true,
+      browser: { console: { enabled: true }, network: { enabled: true }, page: { enabled: true } },
+    },
   },
-});
+  { maxRetries: 0, timeout: 30_000 },
+);
 const id = browser.session_id;
 let replayId: string | undefined;
 try {
   replayId = (await kernel.browsers.replays.start(id)).replay_id;
-  const r = await kernel.browsers.playwright.execute(id, { code: `await page.goto('https://example.com'); return await page.title();` });
-  if (!r.success) throw new Error(r.error);
+  const r = await kernel.browsers.playwright.execute(
+    id,
+    { code: `await page.goto('https://example.com'); return await page.title();`, timeout_sec: 30 },
+    { maxRetries: 0, timeout: 40_000 },
+  );
+  if (!r.success) throw new Error(String(r.error));
 } finally {
   if (replayId) await kernel.browsers.replays.stop(replayId, { id_or_name: id }).catch(() => {});
-  await kernel.browsers.deleteByID(id);
+  // a 404 means the timeout already reaped the browser: that is fine
+  await kernel.browsers.deleteByID(id).catch((e) => {
+    if (!(e instanceof Kernel.NotFoundError)) throw e;
+  });
   console.log('debug with:', id); // keep the id, it is the key to everything below
 }
 ```
@@ -47,7 +56,8 @@ try {
 Facts that change what you do:
 - Telemetry costs overhead and captures sensitive data (see O5). Console, network and page attach a CDP collector; do not enable them "just in case" on regulated sites.
 - Events are retained 30 days (https://www.kernel.sh/docs/browsers/telemetry/overview).
-- Uncaught page errors arrive as `console_error`. There is no `page_error` event (P19 refuted).
+- Uncaught page errors arrive as `console_error`. There is no `page_error` event.
+- Read page errors from telemetry (or console events), not from a `page.on('pageerror')` listener inside `playwright.execute`. Verified live: such a listener, attached before `page.goto`, did not fire for a page's uncaught onload error, while telemetry recorded it as `console_error` (`Uncaught TypeError`, with `source_url`, line and column). A `page.on('console')` listener did catch the page's 404.
 
 ## O2. Debug ladder (after the browser is gone)
 
@@ -60,28 +70,28 @@ Facts that change what you do:
    kernel browsers telemetry events <id> --since 1h --categories console -o json
    ```
 3. Replays: `kernel browsers replays list <id> -o json` (works after delete). The view URL is a credential; do not paste it.
-4. Live-only tools (screenshot, logs, process exec) need a live browser. Do not expect them for a deleted one (per the debug skill; not run in the lab).
+4. Live-only tools (screenshot, logs, process exec) need a live browser. Do not expect them for a deleted one (per the debug skill; untested).
 
 **Avoid**
 - The default window. `--since` defaults to 5 minutes before now, so an older session looks empty. Pass an RFC-3339 time or a duration like `1h`. `--until` in the future is rejected ("time must not be in the future").
 - Dumping all events. A 12-second headful session produced 58 events of 16 types. Filter by `--types` or `--categories`, add `--limit`, use `jq`.
-- Trusting the wrong signals (all from lab P19):
-  - A top-level `page.goto` to a page that answers HTTP 500 does throw, `net::ERR_HTTP_RESPONSE_CODE_FAILURE`, so `playwright.execute` returns `success:false` (dogfood D10). The message is in the caller's result, not in telemetry.
+- Trusting the wrong signals (all verified live):
+  - A top-level `page.goto` to a page that answers HTTP 500 does throw, `net::ERR_HTTP_RESPONSE_CODE_FAILURE`, so `playwright.execute` returns `success:false`. The message is in the caller's result, not in telemetry.
   - `page.goto('https://x.invalid/')` does not throw. Read `page_*` and `network_*` events and the page title instead of catching.
   - A `fetch` that returns 500 in the page shows up as `network_loading_failed` (`ERR_ABORTED`, `canceled`), not as a `network_response` with status 500.
   - Most `network_loading_failed` noise came from a service worker calling a Kernel-internal endpoint. Look at `data.target_type` and `data.url` before blaming your site.
 - Printing the deleted record raw: it carries `cdp_ws_url` and `webdriver_ws_url` keys. Select fields with `jq`.
 
-**Source** lab P19; https://www.kernel.sh/docs/browsers/telemetry/categories
+**Source** https://www.kernel.sh/docs/browsers/telemetry/categories
 
-Event shapes you will filter on (P18, P19):
-- Every event, from the CLI (`-o json` gives `{ "events": [ ... ] }`), the SDK (`events()` and `stream()`) and the type declarations, is wrapped as `{ seq, event: { ts, type, category, source, data } }`. `seq` is on the wrapper, `ts` is microseconds. Read `e.event.type` and `e.event.data`, never `e.type`: a filter on top-level `category` or `type` silently matches nothing (P13). The SDK stream loop destructures it as `{ seq, event }`.
+Event shapes you will filter on:
+- Every event, from the CLI (`-o json` gives `{ "events": [ ... ] }`), the SDK (`events()` and `stream()`) and the type declarations, is wrapped as `{ seq, event: { ts, type, category, source, data } }`. `seq` is on the wrapper, `ts` is microseconds. Read `e.event.type` and `e.event.data`, never `e.type`: a filter on top-level `category` or `type` silently matches nothing. The SDK stream loop destructures it as `{ seq, event }`.
 - `console_error.data`: `text`, `source_url`, `line`, `column`. `network_loading_failed.data`: `error_text`, `canceled`, `url`, `resource_type`, `target_type`.
 - `kernel.browsers.telemetry.events(id, { type: [...], category: [...], since, limit })` filters server-side and pages; iterate it with `for await`.
 
 ## O3. React while it runs (stream)
 
-**If** code must react to page events live (wait for settle, count failures, detect captcha solves). **Do** use `kernel.browsers.telemetry.stream(id)`, track `seq`, and on disconnect reopen with `'Last-Event-ID': String(lastSeq)`. The lab got contiguous seqs with nothing missed after reconnect. **Avoid** assuming order or delivery: the docs say delivery is best-effort and a captcha start can arrive after its result; gaps in `seq` mean dropped events. **Source** lab P18 `telemetry_events_and_resume.ts`; https://www.kernel.sh/docs/browsers/telemetry/streaming
+**If** code must react to page events live (wait for settle, count failures, detect captcha solves). **Do** use `kernel.browsers.telemetry.stream(id)`, track `seq`, and on disconnect reopen with `'Last-Event-ID': String(lastSeq)`. Verified live: contiguous seqs with nothing missed after reconnect. **Avoid** assuming order or delivery: the docs say delivery is best-effort and a captcha start can arrive after its result; gaps in `seq` mean dropped events. **Source** https://www.kernel.sh/docs/browsers/telemetry/streaming
 
 ```ts
 const stream = await kernel.browsers.telemetry.stream(id);
@@ -97,15 +107,15 @@ try {
 ```
 
 Rules:
-- **Filter client-side in SDK code.** The SDK `stream(id, { type })` sends `?type=` but the lab received every type anyway (P18 refuted). `events({ type })` and `events({ category })` do filter. The CLI `--types` filters server-side (confirmed).
-- A fresh connection only sees new events. To start from the oldest retained event pass `{ replay: 'all' }` (SDK) or `--replay=all` (CLI); `--seq N` and `--replay` are mutually exclusive. Both untested in lab; read from the SDK types and CLI source.
+- **Filter client-side in SDK code.** The SDK `stream(id, { type })` sends `?type=` but every type was received anyway (verified live). `events({ type })` and `events({ category })` do filter. The CLI `--types` filters server-side (confirmed).
+- A fresh connection only sees new events. To start from the oldest retained event pass `{ replay: 'all' }` (SDK) or `--replay=all` (CLI); `--seq N` and `--replay` are mutually exclusive. Both untested; read from the SDK types and CLI source.
 - Stream end: SDK throws `TypeError: terminated` when the browser is deleted; the CLI exits 1 with empty stderr. Treat both as a normal end. A CLI stream written to a file is complete only after the process exits.
-- For "page is ready" use `page_navigation_settled`: it fires once per top-level navigation after DOM content loaded and layout settled, and is independent of `network_idle`, so one hung request cannot stall it. It needs `page_load`, so a page whose `load` never fires emits none. Enable the `page` category. (Docs: https://www.kernel.sh/docs/browsers/telemetry/categories. P19 emitted `page_navigation_settled`, one of 16 types in 58 events, but the lab did not use it as a readiness gate.)
-- CLI, filtered (confirmed in P18): `kernel browsers telemetry stream <id> --types console_error -o json` emits newline-delimited envelopes.
+- For "page is ready" use `page_navigation_settled`: it fires once per top-level navigation after DOM content loaded and layout settled, and is independent of `network_idle`, so one hung request cannot stall it. It needs `page_load`, so a page whose `load` never fires emits none. Enable the `page` category. (Docs: https://www.kernel.sh/docs/browsers/telemetry/categories. A live session emitted `page_navigation_settled`, but it was not used as a readiness gate.)
+- CLI, filtered (verified live): `kernel browsers telemetry stream <id> --types console_error -o json` emits newline-delimited envelopes.
 
-Captcha events (P13, `stealth: true` + captcha telemetry, which is in the default set):
+Captcha events (verified live, `stealth: true` + captcha telemetry, which is in the default set):
 - Wait for the solver; do not click the checkbox. Solved runs show `captcha_solve_started`, `captcha_solve_result` (`status: success`), then `captcha_challenge_result` (`status: solved`). A non-stealth browser emitted zero captcha events and never solved. More: `references/unblock.md`.
-- Join on `task_id`. In the P13 run only `captcha_challenge_result` carried `challenge_id`; the docs say reCAPTCHA v2 task events can omit it. Read `captcha_provider` and `task_kind`.
+- Join on `task_id`. In that run only `captcha_challenge_result` carried `challenge_id`; the docs say reCAPTCHA v2 task events can omit it. Read `captcha_provider` and `task_kind`.
 - `solved` means the widget cleared, not that the site accepted it. Check the page after.
 - **Avoid** reading `captcha_type`: it is deprecated and read `other` on solve events.
 - The token appeared about 5 s to 67 s after navigation across three stealth runs; allow a bounded wait, then fall back to page state.
@@ -119,7 +129,7 @@ Captcha events (P13, `stealth: true` + captcha telemetry, which is in the defaul
 - A signal path in the endpoint (`/v1/logs` is rejected; Kernel appends it). Records are OTLP logs only. `screenshot` and `monitor` are not exported.
 - Embedding the ingestion key anywhere but an env var; header values are write-only.
 
-**Source** https://www.kernel.sh/docs/browsers/telemetry/export. (unverified: no destination was created in the lab; shapes are from the docs, SDK types and CLI source.)
+**Source** https://www.kernel.sh/docs/browsers/telemetry/export. (unverified: no destination was created; shapes are from the docs, SDK types and CLI source.)
 
 ## O5. Regulated or sensitive data
 
@@ -134,9 +144,9 @@ Captcha events (P13, `stealth: true` + captcha telemetry, which is in the defaul
 
 ## O6. Human watches or steps in (live view)
 
-**Getting the URL.** A headful create returns `browser.browser_live_view_url`; a headless create omits it (P18). For an EXISTING browser id, call `kernel.browsers.retrieve(id)`: the response carries `browser_live_view_url` (dogfood D16 ran it on a headful browser; undefined means headless or not running). CLI: `kernel browsers view <id-or-name>`.
+**Getting the URL.** A headful create returns `browser.browser_live_view_url`; a headless create omits it. For an EXISTING browser id, call `kernel.browsers.retrieve(id)`: the response carries `browser_live_view_url` (verified live on a headful browser; undefined means headless or not running). CLI: `kernel browsers view <id-or-name>`.
 
-**Case 1: read-only watcher.** **If** a person only watches. **Do** append `?readOnly=true` to the URL (the docs claim it; the URL parses and round-trips, but no lab opened it, so read-only behaviour is untested). Set it with `new URL(u).searchParams.set('readOnly', 'true')`. Toggle later without reload via `KERNEL_SET_READ_ONLY` (below).
+**Case 1: read-only watcher.** **If** a person only watches. **Do** append `?readOnly=true` to the URL (the docs claim it; the URL parses and round-trips, but it was never opened in a browser, so read-only behaviour is untested). Set it with `new URL(u).searchParams.set('readOnly', 'true')`. Toggle later without reload via `KERNEL_SET_READ_ONLY` (below).
 
 **Case 2: person takes over** (MFA, a captcha you will not automate, an approval). **Do** hand over the plain URL, with no `readOnly`.
 
@@ -146,20 +156,20 @@ Both cases:- Embed it in an iframe on your own page, and gate your UI on the par
 
 **Avoid**
 - Treating the URL as public. It is a token for a live, controllable browser: do not log it, send it to a frontend you do not control, or put it in an LLM prompt. It becomes invalid when the browser is deleted or times out.
-- Headless browsers: `browser_live_view_url` is absent from a headless create and present on a headful create (P18). Create headful when anyone may need to watch.
+- Headless browsers: `browser_live_view_url` is absent from a headless create and present on a headful create. Create headful when anyone may need to watch.
 - Expecting the browser to idle out while someone watches: a connected live view client keeps the browser out of standby, so the timeout does not start (https://www.kernel.sh/docs/browsers/standby).
 - Exposing the URL while connected: a connected live view keeps the browser billing.
 - Kiosk mode (`kiosk_mode: true`, fullscreen view) for latency-sensitive handoffs: it restarts Chromium and takes seconds; the docs suggest a pool (https://www.kernel.sh/docs/browsers/live-view). Untested.
 
-**Source** https://www.kernel.sh/docs/browsers/live-view; lab P18 (URL present headful, absent headless).
+**Source** https://www.kernel.sh/docs/browsers/live-view.
 
 ## O7. Replays
 
 **If** you want a video of the run (post-mortem, handoff, audit). **Do** create headful, `replays.start(id)` before the first action, `replays.stop(replayId, { id_or_name: id })` before you delete, then `list` until `finished_at` is set, then `download`. You may start several replays per browser; each has its own `replay_id`. **Avoid**
 - `replays.stop(rid, { id })` as the docs show. It throws client-side ("Path parameters result in path with invalid segments"). `stop` and `download` take `{ id_or_name }`; `start` and `list` take the id positionally.
 - A headless browser: `replays.start` returns 400 `invalid_request` "headless browsers don't support replays at this time".
-- A fixed sleep. Poll `finished_at`, and also handle HTTP 202 on download (a troubleshooting note reports 202 plus `Retry-After` while finalizing, not found in the Kernel docs pages; the lab saw 200 immediately in 2 samples and never a 202, so keep the code path).
-- Deleting before you stop. Stop first, then delete (the lab did both in `finally`, in that order).
+- A fixed sleep. Poll `finished_at`, and also handle HTTP 202 on download (a troubleshooting note reports 202 plus `Retry-After` while finalizing, not found in the Kernel docs pages; 200 came back immediately in 2 samples and never a 202, so keep the code path).
+- Deleting before you stop. Stop first, then delete (do both in `finally`, in that order).
 - Sharing `replay_view_url`; it is sensitive.
 
 ```ts
@@ -181,29 +191,27 @@ if (!res.ok) throw new Error(`replay download failed: HTTP ${res.status}`);
 writeFileSync('replay.mp4', Buffer.from(await res.arrayBuffer())); // import { writeFileSync } from 'node:fs'
 ```
 
-The download snippet's status, polling and `Buffer` read ran in P18 (200, video/mp4, about 272 KB for 10 s, video only, no audio); the whole create, replay and write-file flow ran again as written in dogfood D11 (200 on the first try). The 202 retry loop has never run, because no download returned 202. CLI (from the docs, untested here): `kernel browsers replays start|stop|list|download`. Managed auth logins can record too (https://www.kernel.sh/docs/auth/configuration#record-sessions-for-debugging). Source: https://www.kernel.sh/docs/browsers/replays.
+The download snippet's status, polling and `Buffer` read were verified live (200, video/mp4, about 272 KB for 10 s, video only, no audio); the whole create, replay and write-file flow ran again as written (200 on the first try). The 202 retry loop has never run, because no download returned 202. CLI (from the docs, untested): `kernel browsers replays start|stop|list|download`. Managed auth logins can record too (https://www.kernel.sh/docs/auth/configuration#record-sessions-for-debugging). Source: https://www.kernel.sh/docs/browsers/replays.
 
 ## O8. Secrets in telemetry
 
-**If** you capture `control`. **Do** read passwords and tokens inside the page or from variables your code reads at run time; use vaults or Managed Auth for site logins (`references/logins.md`, `references/vaults-payments.md`). **Avoid** literals in `playwright.execute({ code })`: the code is stored in telemetry as `api_call.data.code`. Typed text is not captured by `cdp_command` (lengths only), and password fields are suppressed in `interaction_*` events. (api_call code capture: docs only, not read back in the lab. P19 did not print the `code` field.) Source: https://www.kernel.sh/docs/browsers/telemetry/categories.
+**If** you capture `control`. **Do** read passwords and tokens inside the page or from variables your code reads at run time; use vaults or Managed Auth for site logins (`references/logins.md`, `references/vaults-payments.md`). **Avoid** literals in `playwright.execute({ code })`: the code is stored in telemetry as `api_call.data.code`. Typed text is not captured by `cdp_command` (lengths only), and password fields are suppressed in `interaction_*` events. (api_call code capture: docs only, not read back). Source: https://www.kernel.sh/docs/browsers/telemetry/categories.
 
 ## O9. Choosing categories at create
 
-**If** you choose categories. **Do** list every category you need in the create call and read the create response's `telemetry.browser` to see what is actually on. **Avoid** relying on "exactly those categories": the docs and CLI help say selection is opt-in, but the lab disagrees. A create with only `console` (and with console, network, page) came back with `captcha`, `connection`, `control`, `system` also enabled; the operational defaults always layer on (P13, P18, P19, LEAD). Consequences:
-- A console-only session still records `cdp_connect`, `cdp_disconnect` and `cdp_command` events, but no `page_*` or `network_*` events (P18 after navigation).
-- To keep a default category off, set it explicitly: `captcha: { enabled: false }` (type-level, unverified in the lab).
+**If** you choose categories. **Do** list every category you need in the create call and read the create response's `telemetry.browser` to see what is actually on. **Avoid** relying on "exactly those categories": the docs and CLI help say selection is opt-in, but live behavior differs. A create with only `console` (and with console, network, page) came back with `captcha`, `connection`, `control`, `system` also enabled; the operational defaults always layer on (verified live). Consequences:
+- A console-only session still records `cdp_connect`, `cdp_disconnect` and `cdp_command` events, but no `page_*` or `network_*` events (after navigation).
+- To keep a default category off, set it explicitly: `captcha: { enabled: false }` (type-level, unverified).
 - `platform` is off by default; enable it only to debug profile saves, replays or session setup.
 - High-volume noise: `control.cdp.excluded_methods: ['Input.dispatchMouseEvent', 'Page.captureScreenshot']` omits those from telemetry only (untested).
 - Update semantics (docs, untested): a category list patches the current selection; `{ enabled: true }` resets it to the default set plus what you pass; `{ enabled: false }` stops capture. CLI: `kernel browsers update <id> --telemetry=off`.
 
-**Source** https://www.kernel.sh/docs/browsers/telemetry/overview; lab P13, P18, P19, LEAD.
+**Source** https://www.kernel.sh/docs/browsers/telemetry/overview.
 
 Categories in one line each: `control` (api_call, cdp_command), `connection` (cdp_connect/disconnect, live_view_connect/disconnect), `system` (system_oom_kill, service_crashed), `captcha` (3 captcha_* types), `platform` (platform_api_call), `console` (console_log, console_error), `network` (network_request, network_response, network_loading_failed, network_idle, proxy_error), `page` (page_navigation, page_load, page_navigation_settled, page_crashed, ...), `interaction`, `screenshot` (periodic images, highest exposure). Full list: https://www.kernel.sh/docs/browsers/telemetry/categories.
 
 ## App invocation logs
 
-**If** the code runs as a Kernel App. **Do** use `kernel.invocations.follow(invocationId)` live; for past output the CLI needs the invocation id (`kernel logs <app> -i <invocation_id>`; `--since` alone printed only headers in P17). See `references/apps.md`. Source: https://www.kernel.sh/docs/apps/logs.
+**If** the code runs as a Kernel App. **Do** use `kernel.invocations.follow(invocationId)` live; for past output the CLI needs the invocation id (`kernel logs <app> -i <invocation_id>`; `--since` alone printed only headers when tried). See `references/apps.md`. Source: https://www.kernel.sh/docs/apps/logs.
 
-Verified in lab 2026-10-20 on @onkernel/sdk 0.127.0; types re-checked on 0.128.0
-
-Probes: P18 (confirmed: CLI `--types` filter, stream resume with `Last-Event-ID`, replay start/stop/download with `id_or_name`, headless replay 400, live view URL present headful and `readOnly` parses, events readable after delete; refuted: console-only isolation, SDK stream `type` filter, `stop(..., { id })`, download 202), P19 (confirmed: debug ladder after delete with `--include-deleted`, `--since`, `--all`, `--types`, `--categories`, replays list; refuted: `page_error`, bad-host navigation throwing, 500 fetch as `network_response`, `status` on deleted record), P13 (confirmed: captcha events with stealth, none without; refuted: top-level `category`/`type` on frames), LEAD (confirmed: `events()` `type` and `category` filters). NOT tested: OTLP export and destinations, ZDR/BAA, `telemetry.storage`, `excluded_methods`, update semantics, stream `replay: 'all'` and `--seq`, opening live view or `readOnly` in a browser, parent-frame iframe messages, kiosk mode, replay audio/framerate/`max_duration`, replay longer than a minute, replay 202 path, `kernel browsers replays` CLI, `order: 'desc'`, `kernel browsers view`.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.

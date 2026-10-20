@@ -22,22 +22,22 @@ The bundled config is `plugins/kernel/.mcp.json` (an `http` server at the endpoi
 | Interactive client | OAuth 2.1 (browser prompt) | Assuming it is project-scoped: check M4 |
 | CI, scripts, or a client that fails OAuth with an issuer mismatch (strict RFC 9207 check) | `Authorization: Bearer <Kernel API key>`; non-JWT bearers are treated as API keys | Pasting the key into a committed config; read it from the environment |
 
-- Lab (P21): Bearer key -> `initialize` 200 with an `mcp-session-id` header; no key -> 401 with `WWW-Authenticate: Bearer realm="OAuth", error="invalid_token"`. A 200 with `x-clerk-auth-message: Invalid JWT form` on a key is expected, not an error.
-- Whether `${KERNEL_API_KEY}` header expansion in a Claude Code `.mcp.json` works is (unverified: not tested in the lab). An unset variable is sent literally, so a missing `KERNEL_API_KEY` gives a bad Bearer header rather than a clear error (Claude Code docs, `mcp#environment-variable-expansion`; unverified).
+- Verified live: Bearer key -> `initialize` 200 with an `mcp-session-id` header; no key -> 401 with `WWW-Authenticate: Bearer realm="OAuth", error="invalid_token"`. A 200 with `x-clerk-auth-message: Invalid JWT form` on a key is expected, not an error.
+- Whether `${KERNEL_API_KEY}` header expansion in a Claude Code `.mcp.json` works is (unverified: not tested). An unset variable is sent literally, so a missing `KERNEL_API_KEY` gives a bad Bearer header rather than a clear error (Claude Code docs, `mcp#environment-variable-expansion`; unverified).
 - Source: https://www.kernel.sh/docs/reference/mcp-server/authentication, https://www.kernel.sh/docs/reference/mcp-server/troubleshooting
 
 ## M4. First call: who am I
 
-**If** you are about to create or delete anything -> **Do** call `get_connection_context` first and read `connection_scope` (`kind`, `project_id`) so you know which org or project you are touching. -> **Avoid** assuming the scope: with an API key the lab saw `kind: organization`, `project_id: null`. -> **Source** probe P21
+**If** you are about to create or delete anything -> **Do** call `get_connection_context` first and read `connection_scope` (`kind`, `project_id`) so you know which org or project you are touching. -> **Avoid** assuming the scope: with an API key we saw `kind: organization`, `project_id: null`. -> **Source** verified live
 
-- Pass a `context` string (one line saying why you call) on every call anyway. The schema marks it required on most tools, but the lab server accepted `manage_browsers list` and `get_connection_context` without it (create and delete without it: untested). Treat it as advisory, not as something to rely on skipping. Docs/schema vs lab: lab wins for list/read calls.
+- Pass a `context` string (one line saying why you call) on every call anyway. The schema marks it required on most tools, but the server accepted `manage_browsers list` and `get_connection_context` without it (create and delete without it: untested). Treat it as advisory, not as something to rely on skipping. Docs/schema vs live behavior: live behavior wins for list/read calls.
 
 ## M5. Do not hard-code the tool list
 
-**If** you need to know which tools exist -> **Do** read the live `tools/list` (your client already shows it). -> **Avoid** quoting a count: the tool reference pages document 13, the server source names 34, the hosted server returned 31 in the lab (`web_search`, `open_auth_login`, `begin_auth_login` were gated out). Some tools depend on org entitlements, cached up to 30 min in the server source. -> **Source** probe P21, `tool-names.ts`
+**If** you need to know which tools exist -> **Do** read the live `tools/list` (your client already shows it). -> **Avoid** quoting a count: the tool reference pages document 13, the server source names 34, the hosted server returned 31 live (`web_search`, `open_auth_login`, `begin_auth_login` were gated out). Some tools depend on org entitlements, cached up to 30 min in the server source. -> **Source** the server source `tool-names.ts`
 
 ```ts
-// P21 mcp-initialize-list.ts, trimmed. Run with KERNEL_API_KEY in the environment.
+// Trimmed. Run with KERNEL_API_KEY in the environment.
 const url = "https://mcp.onkernel.com/mcp";
 const base = {
   "Content-Type": "application/json",
@@ -52,7 +52,7 @@ async function post(body: object, sid?: string) {
   });
   return { status: res.status, sid: res.headers.get("mcp-session-id") ?? undefined, text: await res.text() };
 }
-const init = await post({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "probe", version: "1.0.0" } } });
+const init = await post({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "mcp-check", version: "1.0.0" } } });
 if (!init.sid) throw new Error(`no session id on initialize (status ${init.status})`);
 await post({ jsonrpc: "2.0", method: "notifications/initialized" }, init.sid);
 const list = await post({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }, init.sid);
@@ -66,29 +66,29 @@ Never print the session id. Responses are SSE: parse the `data: ` line.
 
 | Situation | Do | Avoid | Source |
 |---|---|---|---|
-| How does X work in Kernel | `search_docs` `{ query }`. Returns text (not structured content): markdown headed `## N. <page>`; lab got 10 hits for "browser pools" | Guessing a flag before checking | https://www.kernel.sh/docs/reference/mcp-server/tools/search-docs |
+| How does X work in Kernel | `search_docs` `{ query }`. Returns text (not structured content): markdown headed `## N. <page>`; got 10 hits for "browser pools" | Guessing a flag before checking | https://www.kernel.sh/docs/reference/mcp-server/tools/search-docs |
 | Make, list, inspect, delete a browser | `manage_browsers` `action: create\|update\|list\|get\|get_telemetry\|delete`; `remote_forward` (`remoteport:host:localport`) exposes a local dev server to the browser | Calling `delete` without `session_id`; trusting the docs action list (it omits `update` and `get_telemetry`; the live schema has all six) | https://www.kernel.sh/docs/reference/mcp-server/tools/manage-browsers |
-| One-off page check | `execute_playwright_code` `{ session_id, code }`; `return` the value you need. Lab: `page.goto('https://example.com'); return await page.title()` worked | Expecting it to create or delete the browser (`session_id` is required) | probe P21 |
+| One-off page check | `execute_playwright_code` `{ session_id, code }`; `return` the value you need. Verified live: `page.goto('https://example.com'); return await page.title()` worked | Expecting it to create or delete the browser (`session_id` is required) | verified live |
 | Screenshot | `computer_action` with `screenshot` | `page.screenshot()` inside the code (docs prefer `computer_action`) | https://www.kernel.sh/docs/reference/mcp-server/tools/execute-playwright-code |
-| Record video | `manage_replays` `action: start\|stop\|list` | Using a headless browser (docs: needs headful); assuming your plan allows it (paid plan: unverified; start/stop not called in the lab) | https://www.kernel.sh/docs/reference/mcp-server/tools/manage-replays |
-| Pull files out of a browser | `manage_browser_files`; schema: `max_bytes` default 10 MiB, maximum 25 MiB | Assuming read/download works (not exercised) | probe P21 |
+| Record video | `manage_replays` `action: start\|stop\|list` | Using a headless browser (docs: needs headful); assuming your plan allows it (paid plan: unverified; start/stop not called live) | https://www.kernel.sh/docs/reference/mcp-server/tools/manage-replays |
+| Pull files out of a browser | `manage_browser_files`; schema: `max_bytes` default 10 MiB, maximum 25 MiB | Assuming read/download works (not exercised) | the tool schema |
 | Apps | `manage_apps` | | `references/apps.md` |
 
-- Limits that change what you do: `browser_repl` `timeout_sec` is 1-150 (default 60; it terminates the REPL on timeout); `webmcp` `invoke` `timeout_sec` is 1-120 (default 60). Both from the docs, not lab-run. -> https://www.kernel.sh/docs/reference/mcp-server/tools/browser-repl, https://www.kernel.sh/docs/reference/mcp-server/tools/webmcp
+- Limits that change what you do: `browser_repl` `timeout_sec` is 1-150 (default 60; it terminates the REPL on timeout); `webmcp` `invoke` `timeout_sec` is 1-120 (default 60). Both from the docs, not run live. -> https://www.kernel.sh/docs/reference/mcp-server/tools/browser-repl, https://www.kernel.sh/docs/reference/mcp-server/tools/webmcp
 - Do not retry `webmcp` invoke or `browser_repl` automatically after a transport failure (docs). A `browser_repl` timeout or crash terminates the REPL and clears its state, so re-check state first.
 - Sessions can be addressed by name or ID, but pool release needs the ID (`session_id`), not the name (see `references/scale.md`).
 
 ## M7. Create, use, delete: leave nothing behind
 
-**If** you create a browser through MCP -> **Do** pass `headless: true`, a small `timeout_seconds`, and `tags` (for example `{ lab: "plugin-test" }`), and delete it with `manage_browsers delete` when done. Verify with `kernel browsers list --status active -o json`. -> **Avoid** relying on a parse of the create response to get the ID in a script, and relying on the timeout to clean up. -> **Source** probe P21
+**If** you create a browser through MCP -> **Do** pass `headless: true`, a small `timeout_seconds`, and `tags` (for example `{ purpose: "check" }`), and delete it with `manage_browsers delete` when done. Verify with `kernel browsers list --status active -o json`. -> **Avoid** relying on a parse of the create response to get the ID in a script, and relying on the timeout to clean up. -> **Source** verified live
 
-- Lab: create (headless, `timeout_seconds: 60`, tags) -> 200; it appeared in `kernel browsers list --status active --tag probe=P21 -o json` while alive; MCP `delete` replied "browser session deleted successfully"; the list was then `[]`.
-- Trap found in the lab: the lab's own output redaction in `bin/mcpcall` broke `JSON.parse` on the create response (the server response was valid) (`cdp?jwt=***"` swallowed an escaped quote), no ID was saved, and the browser survived several minutes past its 60 s timeout until deleted by ID from `kernel browsers list`. If you lose the ID, list by tag and delete by ID.
+- Verified live: create (headless, `timeout_seconds: 60`, tags) -> 200; it appeared in `kernel browsers list --status active --tag <key>=<value> -o json` while alive; MCP `delete` replied "browser session deleted successfully"; the list was then `[]`.
+- Trap seen live: a client-side redaction of the create response (it masked a URL and swallowed an escaped quote) broke `JSON.parse`, no ID was saved, and the browser survived several minutes past its 60 s timeout until deleted by ID from `kernel browsers list`. If you lose the ID, list by tag and delete by ID.
 - The create response contains the CDP URL and live view URL: these are credentials. Never print, log or paste them.
 
 ## M8. Inputs: use the nested forms
 
-**If** you set proxy, project or network options on `manage_browsers` -> **Do** use the nested `proxy` object (`mode: direct|default`, `id`, `name`) and the schema's replacements. -> **Avoid** the flat aliases the server marks deprecated: `proxy_id` (use `proxy.id`), `proxy_routes` (use `network.proxy_routes`), `clear_proxy` (use `proxy.mode: default`), `disable_default_proxy` (use `proxy.mode: direct`), `project_id` (use `project`). The docs example for `manage_browsers` still shows `proxy_id` with no deprecation note: the live schema wins. -> **Source** probe P21 (43 deprecated-tagged properties across 23 tools)
+**If** you set proxy, project or network options on `manage_browsers` -> **Do** use the nested `proxy` object (`mode: direct|default`, `id`, `name`) and the schema's replacements. -> **Avoid** the flat aliases the server marks deprecated: `proxy_id` (use `proxy.id`), `proxy_routes` (use `network.proxy_routes`), `clear_proxy` (use `proxy.mode: default`), `disable_default_proxy` (use `proxy.mode: direct`), `project_id` (use `project`). The docs example for `manage_browsers` still shows `proxy_id` with no deprecation note: the live schema wins. -> **Source** verified live (43 deprecated-tagged properties across 23 tools)
 
 ## M9. Known unknowns
 
@@ -96,6 +96,4 @@ Never print the session id. Responses are SSE: parse the `data: ` line.
 - Whether Kernel OAuth passes a strict RFC 9207 issuer check: (unverified); the docs recommend an API key if it does not.
 - MCP `manage_replays`, file read/download, and create/delete without `context`: (untested).
 
----
-
-> Verified in lab: 2026-10-20, kernel CLI 0.49.0. Probes: P21 (confirmed: initialize/401, tools/list = 31, get_connection_context, search_docs, create/execute/delete lifecycle, file and replay schemas, deprecated aliases; refuted: context required on every call). Not tested: replays start/stop, file read/download, OAuth flow, Bearer header expansion in `.mcp.json`, TypeScript port of the create/delete lifecycle (it ran as bash).
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.

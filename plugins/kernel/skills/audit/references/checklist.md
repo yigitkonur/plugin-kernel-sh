@@ -138,4 +138,6 @@ await release(lease.session_id, false);
 
 A hit inside a comment, a string that documents the old name, or a test fixture is not a finding. A hit in `node_modules`, `dist` or a lockfile is noise; skip it.
 
-> Verified live 2026-10-20 with @onkernel/sdk 0.127.0 and kernel CLI 0.49.0: C01, C02, C03, C07, C08, C16, C17 and the K003 removal. Docs only, unverified: payments (C09), SDK retry on real 5xx (C06), sync invoke past 100 s (C05), project 403 (C13), duplicate MCP servers (C14), React token flow (C12).
+Docs only, unverified: payments (C09), SDK retry on real 5xx (C06), sync invoke past 100 s (C05), project 403 (C13), duplicate MCP servers (C14), React token flow (C12). Checks C01, C02, C03, C07, C08, C16, C17 and the K003 removal were verified live.
+
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.

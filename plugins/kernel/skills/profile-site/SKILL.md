@@ -8,9 +8,9 @@ disable-model-invocation: true
 
 # Profile a site's bot detection with Kernel
 
-You are measuring how one website treats a Kernel stealth browser and a normal Kernel browser on the same network, naming the anti-bot vendors it uses, and recommending a Kernel configuration. Read-only toward the site (two page loads per browser: home page and a login page the analyzer finds, plus up to seven HEAD requests to common login paths when no login link is found). Creates two billable headful browsers (about $0.48/hour each, so roughly a few cents for ~5 minutes); you delete both before you finish.
+You are measuring how one website treats a Kernel stealth browser and a normal Kernel browser on the same network, naming the anti-bot vendors it uses, and recommending a Kernel configuration. Read-only toward the site (two page loads per browser: home page and a login page the analyzer finds, plus up to seven HEAD requests to common login paths when no login link is found). Creates two billable headful browsers (about $0.48/hour each, so roughly a few cents for ~5 minutes; Kernel pricing page, checked 2026-10-20); you delete both before you finish.
 
-Use it for a real target. A fingerprint test page such as bot.sannysoft.com cannot tell the modes apart: in the dogfood run it gave 57 per-check results, all passing and identical in stealth and normal.
+Use it for a real target. A fingerprint test page such as bot.sannysoft.com cannot tell the modes apart: in a live run it gave 57 per-check results, all passing and identical in stealth and normal.
 
 The argument is the text after the skill name in the user's message (or the line starting `ARGUMENTS:`). It is a URL or hostname. If it is missing, ask for it and stop. Normalize a bare hostname to `https://<host>/`. Refuse and ask again if the URL has credentials, tokens, signed query strings, a path whose GET triggers an action, or any of `'`, `;`, `$`, a backtick or whitespace (the URL is written into a shell state file and a command). Only profile public sites the user is allowed to test (https://www.kernel.sh/docs/config-registry).
 
@@ -32,7 +32,7 @@ test -n "${KERNEL_API_KEY:-}" && echo "key set" || echo "KERNEL_API_KEY missing"
 - `kernel` missing: print `brew install kernel/tap/kernel` and stop. Do not install anything. `jq` missing, Node older than 22, or `npm` missing: tell the user which one and stop.
 - Key missing: tell the user to export `KERNEL_API_KEY` in their environment (never paste it in chat) and stop.
 
-Then run `kernel auth context -o json | jq 'keys'` and `kernel org limits get -o json`. If auth fails, stop. If limits show no free concurrent browser slots for two browsers, tell the user and stop. A 403 on browser create later means a plan gate or spending cap: read the body, report it, stop.
+Then run `kernel auth context -o json | jq 'keys'` and `kernel org limits get -o json`. If auth fails, stop. If `concurrent_sessions_available` in the limits JSON is below 2 (no free slots for two browsers), tell the user and stop. A 403 on browser create later means a plan gate or spending cap: read the body, report it, stop.
 
 ## 2. Ask the config registry first
 
@@ -85,7 +85,7 @@ source "$W/state.env"
 for id in "$STEALTH_ID" "${NORMAL_ID:-}"; do [ -n "$id" ] && kernel browsers get "$id" -o json | jq '{session_id,stealth,headless,proxy,tags}'; done
 ```
 
-If the stealth create fails (empty `STEALTH_ID`), the normal browser is not created: go to step 7, then report. Both browsers are headful (the default); defended sites flag headless. Check the printed records. Stealth must show `"stealth": true` and `"proxy": {"mode": "direct"}`; normal must show `"stealth": false` and `"proxy": {"mode": "direct"}`. If stealth shows `{"mode": "default"}`, go to step 7, then tell the user the fair comparison was not possible and offer the "platform defaults" design below. (Dogfood run: the session record showed `stealth: true` with `proxy.mode: direct`.)
+If the stealth create fails (empty `STEALTH_ID`), the normal browser is not created: go to step 7, then report. Both browsers are headful (the default); defended sites flag headless. Check the printed records. Stealth must show `"stealth": true` and `"proxy": {"mode": "direct"}`; normal must show `"stealth": false` and `"proxy": {"mode": "direct"}`. If stealth shows `{"mode": "default"}`, go to step 7, then tell the user the fair comparison was not possible and offer the "platform defaults" design below. (Verified live: the session record showed `stealth: true` with `proxy.mode: direct`.)
 
 Other designs, only if the user asks (name the one used in the report): "platform defaults" omits `--proxy-mode direct` on the stealth create and the result is "stealth + default proxy", never stealth alone; "same explicit proxy" adds `--proxy-id <ID>` instead of `--proxy-mode` to both creates (rotation can still change the exit IP).
 
@@ -123,13 +123,13 @@ A `BLOCKED` verdict from the analyzer is a heuristic: confirm it by looking at t
 
 ## 7. Cleanup (always run, even after a failure)
 
-Run now. It lists all active browsers, selects yours by the `run` tag on the client side, and deletes one id per call so one 404 does not stop the rest:
+Run now. It lists active browsers (`--limit 100`; the default is 20, and on a shared account the tag filter can miss yours and the final count can falsely be 0), selects yours by the `run` tag on the client side, and deletes one id per call so one 404 does not stop the rest:
 
 ```bash
 source "$W/state.env"
-kernel browsers list --status active -o json | jq -r --arg run "$RUN" '.[] | select(.tags.run == $run) | .session_id' > "$W/alive.txt"
+kernel browsers list --status active --limit 100 -o json | jq -r --arg run "$RUN" '.[] | select(.tags.run == $run) | .session_id' > "$W/alive.txt"
 while read -r id; do [ -n "$id" ] && { kernel browsers delete "$id" || true; }; done < "$W/alive.txt"
-kernel browsers list --status active -o json | jq --arg run "$RUN" '[.[] | select(.tags.run == $run)] | length'
+kernel browsers list --status active --limit 100 -o json | jq --arg run "$RUN" '[.[] | select(.tags.run == $run)] | length'
 ```
 
 If the final count is not 0, repeat the loop once and name any id you could not delete in the report. If `state.env` is lost, the run id is the work directory's basename (`profile-site.XXXXXX`); never delete browsers whose `run` tag differs. Keep `$W/output` for the user unless they ask you to remove it.
@@ -144,6 +144,7 @@ Judge the two verdicts, then pick the cheapest rung that held. Rungs are the esc
 | vendors, no block | vendors, no block | Detection present, both pass | Normal headful; add stealth only if it blocks later at volume |
 | no block | blocked | Stealth helps on a controlled network (inference from one run) | `stealth: true`. Then re-test with the default stealth proxy (`proxy` omitted), because that is what production gets |
 | blocked | blocked | Both fail on this network | Next rungs: dedicated ISP proxy plus a profile, then residential proxy, then GPU browser (plan-gated); see `../kernel/references/unblock.md` |
+| One side blocked by the analyzer and a screenshot shows a normal page, or a mode where no login page was analyzed | The block is unproven | Do not recommend stealth from it; re-judge with the screenshot and treat the mode as "no data" if nothing was analyzed |
 | blocked | no block | Odd; the proxy/network, not stealth, likely differs between runs | Offer one re-run (it creates two more billable browsers, a few cents) and wait for a yes; report as inconclusive if it repeats or the user declines |
 
 Vendor notes from the analyzer (use them in "Next steps"):
@@ -152,7 +153,7 @@ Vendor notes from the analyzer (use them in "Next steps"):
 - Kasada flow 1 (429 on first load), Akamai `_abck` without `~0~`, Imperva reese84: fingerprint or behavior signals; stealth plus a stable IP and a returning-user profile is the next try, nothing here proves a fix.
 - A 403 with `x-kernel-proxy-error`, or a 502, is Kernel's proxy layer, not the site's bot detection (`../kernel/references/unblock.md` section 8).
 
-If step 2 returned a recommendation that disagrees with your result, that is a reason to test its config, not to ignore either. Config snippet to hand back, only for the rung you recommend:
+If step 2 returned a recommendation that disagrees with your result, prefer your measurement on the user's real network and report the disagreement (both values) in the Registry line; offer to test the recommended config rather than ignoring either. Config snippet to hand back, only for the rung you recommend:
 
 ```ts
 // not run as written; create params are from the SDK types
@@ -191,4 +192,4 @@ Not verified: <list anything skipped or failed>
 ```
 
 > Checked 2026-10-20 against @onkernel/sdk 0.128.0 and kernel CLI 0.49.0.
-> Run live in the dogfood run: the analyzer, `--stealth` with `--proxy-mode direct`, the curl form of `lookup`. Details in the plugin repository's verified-facts.md.
+> Run live: the analyzer, `--stealth` with `--proxy-mode direct`, the curl form of `lookup`. Details in the plugin repository's verified-facts.md.

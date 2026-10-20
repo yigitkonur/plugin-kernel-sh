@@ -2,7 +2,7 @@
 
 Read when a browser must log in or pay and the credential or card number must not pass through your code, your prompts or the model. Vaults are in preview (https://www.kernel.sh/docs/vaults/overview). Login-only tasks with Kernel running the whole login: `references/logins.md` (Managed Auth). Client options and retries: `references/sdk-client.md`. Showing the user the browser: `references/observe.md`.
 
-Vault fill was run live (probe P11). **Payments were never run in the lab** (real money, real wallets): every payment rule below comes from the docs pages cited, not from a probe. Snippets marked `// untested` were not run.
+Vault fill was verified live. **Payments were never run** (real money, real wallets): every payment rule below comes from the docs pages cited, not from a live test. Snippets marked `// untested` were not run.
 
 ## Pick the path
 
@@ -15,7 +15,7 @@ Vault fill was run live (probe P11). **Payments were never run in the lab** (rea
 | The agent should pay Kernel for a browser with no account | MPP, see last section; it is not a merchant checkout | https://www.kernel.sh/docs/info/mpp |
 | Card data typed into a `credential` item | Never. Use `card` / `wallet` items | https://www.kernel.sh/docs/vaults/credentials |
 
-## Vault fill (login) - lab confirmed
+## Vault fill (login) - verified live
 
 **If** the page needs a stored username/password/TOTP and the model must never read it
 **Do**
@@ -26,7 +26,7 @@ Vault fill was run live (probe P11). **Payments were never run in the lab** (rea
 5. Submit the form yourself, then check the page for a logged-in signal.
 
 ```ts
-// untested as written: adapted from lab P11 01/02 (names changed, trimmed; secrets come from your backend, never literals in code)
+// untested as written: adapted from a live run (names changed, trimmed; secrets come from your backend, never literals in code)
 const vault = await kernel.vaults.upsert({ name: 'user-12345' });
 await kernel.vaults.items.upsert('portal-login', {
   id_or_name: vault.id,
@@ -60,46 +60,46 @@ try {
 ```
 
 **Avoid**
-- Treating `completed` as logged in. Lab: after `completed` the URL stayed on `/login`, no flash message; `fill` writes fields and never submits. Check the page after you submit.
+- Treating `completed` as logged in. Verified live: after `completed` the URL stayed on `/login`, no flash message; `fill` writes fields and never submits. Check the page after you submit.
 - Treating `fill` as isolation. Page scripts, extensions and an agent with CDP access can read the filled values. Your controller (not the model) must authorize `page_url` and selectors before every fill: a credential item has no destination allowlist.
-- `sensitive: false` for anything secret. Lab: a non-sensitive field's value comes back in `get` and `list`; sensitive fields show only `has_value: true`. Passwords and TOTP fields must be sensitive.
+- `sensitive: false` for anything secret. Verified live: a non-sensitive field's value comes back in `get` and `list`; sensitive fields show only `has_value: true`. Passwords and TOTP fields must be sensitive.
 - Logging the `action.url` (collection link, 30 minute bearer link) or the filled values. Show the link only in the user's authenticated UI.
-- Reading back the password field to "verify". If you must, report its length only (lab did this).
+- Reading back the password field to "verify". If you must, report its length only (done live).
 - Putting a vault on a pool: pool create has no vault parameter (`references/does-not-exist.md`).
-- Vault count is capped per org (SDK doc comment: 3 on the free tier). Check `max_vaults` in `kernel org limits get -o json` before one vault per user at scale; delete item then vault when done (lab did).
+- Vault count is capped per org (SDK doc comment: 3 on the free tier). Check `max_vaults` in `kernel org limits get -o json` before one vault per user at scale; delete item then vault when done (done live).
 
-**Source** https://www.kernel.sh/docs/vaults/fill, https://www.kernel.sh/docs/vaults/credentials, lab P11
+**Source** https://www.kernel.sh/docs/vaults/fill, https://www.kernel.sh/docs/vaults/credentials; verified live
 
 ### Fill errors: branch on the HTTP status and `code`
 
-| Situation | Lab result (P11, confirmed) | Do |
+| Situation | Verified live | Do |
 |---|---|---|
 | `page_url` not an exact match of the open page (even `?x=1` added) | HTTP 400, `code: 'page_not_found'`, "no fields were written" | Open the page at the exact URL, retry once |
 | Selector matches nothing | HTTP 400, `code: 'element_not_found'` | Fix the selector; password length on the page stayed 0 |
 | `timeout_ms` too small (tested `1`) | HTTP 400, `code: 'timeout'`, nothing written | Raise `timeout_ms` (default 10000, max 30000, total not per field) |
-| Failure after writing started | Docs: known execution failures can return HTTP 200 with `status: 'failed'` or `'unknown'`, with per-field `filled / failed / unknown / not_attempted`; whether this happens only after writing started is our inference from "earlier writes aren't rolled back" (unverified: not reproduced in the lab) | Read the body, not just the status; earlier writes are not rolled back |
+| Failure after writing started | Docs: known execution failures can return HTTP 200 with `status: 'failed'` or `'unknown'`, with per-field `filled / failed / unknown / not_attempted`; whether this happens only after writing started is our inference from "earlier writes aren't rolled back" (unverified: not reproduced live) | Read the body, not just the status; earlier writes are not rolled back |
 
 ```ts
-// from lab P11 03: error shape
+// error shape (verified live)
 import Kernel, { APIError } from '@onkernel/sdk';
 try { /* performOperation(...) */ } catch (e) {
   if (e instanceof APIError) console.log(e.status, JSON.stringify(e.error)); // 400 {code,message}
 }
 ```
 
-**Do** retry a fill only after looking at the page and never in a loop; `fill` never submits, so one retry is safe, and a `totp` field gets a fresh code. **Avoid** SDK default retries on this call (`performOperation` already sends `maxRetries: 0` in `@onkernel/sdk` 0.128.0 source (ref copy, `items.ts:178`); keep it explicit). **Source** https://www.kernel.sh/docs/vaults/fill, lab P11 (03, 05).
+**Do** retry a fill only after looking at the page and never in a loop; `fill` never submits, so one retry is safe, and a `totp` field gets a fresh code. **Avoid** SDK default retries on this call (`performOperation` already sends `maxRetries: 0` in `@onkernel/sdk` 0.128.0 source (ref copy, `items.ts:178`); keep it explicit). **Source** https://www.kernel.sh/docs/vaults/fill, verified live.
 
 ### Rotating and importing values
 
-- **If** your secrets live in another manager (AWS, Vault, etc.) **Do** read them in your trusted backend and pass them as `value` at `upsert`. This stores an encrypted copy in Kernel; it is not a live link, so update the item when the source changes and delete it when retention ends. Source https://www.kernel.sh/docs/vaults/existing-credential-vault (not run in lab).
-- **If** a value changes **Do** `items.update(key, { id_or_name, type: 'credential', version, expected_item_id, spec: { fields: { password: { value } } } })`. A stale `version` returns 409: reload, do not resubmit blindly. Source https://www.kernel.sh/docs/vaults/credentials (not run in lab).
+- **If** your secrets live in another manager (AWS, Vault, etc.) **Do** read them in your trusted backend and pass them as `value` at `upsert`. This stores an encrypted copy in Kernel; it is not a live link, so update the item when the source changes and delete it when retention ends. Source https://www.kernel.sh/docs/vaults/existing-credential-vault (not run live).
+- **If** a value changes **Do** `items.update(key, { id_or_name, type: 'credential', version, expected_item_id, spec: { fields: { password: { value } } } })`. A stale `version` returns 409: reload, do not resubmit blindly. Source https://www.kernel.sh/docs/vaults/credentials (not run live).
 - Field names, types and sensitivity are immutable: use a new item key for a different shape. A vault `totp` field always makes SHA1, 6-digit, 30 s codes; a different algorithm, digits or period needs a Managed Auth credential.
 
 ## 1Password (preview)
 
-**If** the user keeps the login in their own non-shared 1Password vault **Do** create a `provider: '1password'` item, have the user approve each request in the 1Password app, then `1pw_fill` (the extension fills and submits). Offer it, and fall back to a `provider: 'kernel'` credential item if they decline or it fails. **Avoid** promising shared-vault items or passkeys (not supported), and auto-retrying `1pw_fill`: on `fill_unknown`, check the page. `1pw_create_access_request` needs no browser. **Source** https://www.kernel.sh/docs/vaults/1password, https://www.kernel.sh/docs/changelog (October 16). Not run in lab.
+**If** the user keeps the login in their own non-shared 1Password vault **Do** create a `provider: '1password'` item, have the user approve each request in the 1Password app, then `1pw_fill` (the extension fills and submits). Offer it, and fall back to a `provider: 'kernel'` credential item if they decline or it fails. **Avoid** promising shared-vault items or passkeys (not supported), and auto-retrying `1pw_fill`: on `fill_unknown`, check the page. `1pw_create_access_request` needs no browser. **Source** https://www.kernel.sh/docs/vaults/1password, https://www.kernel.sh/docs/changelog (October 16). Not run live.
 
-## Payments (docs only, not run in lab)
+## Payments (docs only, not run)
 
 Roles: your **controller** (trusted backend) verifies the purchase, authorizes selectors, shows hosted links to the user, and observes state. The **agent** drives the page. The **user** connects the wallet and approves. A **wallet** item is the provider connection; a **card** item is the payment material plus its authorization state. Source https://www.kernel.sh/docs/browsers/enable-payments-in-browser-agent
 
@@ -184,11 +184,12 @@ Authorize errors that leave the card `requested` and safe to authorize again: `p
 
 - Kernel docs say the order record decides success; give the agent no "success" signal of its own. Your controller reads the merchant.
 - Observing from the terminal: `kernel vaults items get <vault> <key> --wait 60 -o json` and `kernel vaults items events <vault> <key> --wait 60 -o json`. Each `--wait` is one bounded observation, not a submit. `--open` opens hosted links: use it only in a human-operated terminal and keep its output away from the agent.
-- CLI fill: `kernel vaults items invoke <vault> <key> fill --params '<json>'` or `--spec-file`; exits nonzero on `failed` or `unknown` but keeps the value-free result on stdout with `-o json`. (Not run in lab; flags read from CLI 0.49.0 source.)
+- CLI fill: `kernel vaults items invoke <vault> <key> fill --params '<json>'` or `--spec-file`; exits nonzero on `failed` or `unknown` but keeps the value-free result on stdout with `-o json`. (Not run live; flags read from CLI 0.49.0 source.)
 - Do not use `kernel vaults items ...` output as proof of payment. Do not print `state` of wallets into model context.
+- Not tested: the HTTP 200 per-field `failed / not_attempted` branch, attaching a vault by `name`, CLI `items invoke ... fill`, a non-editable fill target, TOTP fill, credential update, 1Password, hosted `collect` flow, provider configs, MPP, and every payment path (Link authorize/fill, AgentCard aliases and observer, `prepare_checkout`, `recovery_required`, Visa cards), which are docs-only because payments spend real money.
 
 ## Contradictions to know
 
-- Docs say known execution failures can return HTTP 200 with `failed` or `unknown`; they do not describe pre-write validation errors. Lab: pre-write validation failures (`page_not_found`, `element_not_found`, `timeout`) are HTTP 400 with `{ code, message }` and nothing is written. Branch on both.
+- Docs say known execution failures can return HTTP 200 with `failed` or `unknown`; they do not describe pre-write validation errors. Verified live: pre-write validation failures (`page_not_found`, `element_not_found`, `timeout`) are HTTP 400 with `{ code, message }` and nothing is written. Branch on both.
 
-> Verified in lab: 2026-10-20, card L4. Probes: P11 vault fill (confirmed: upsert and list never return secrets; fill into an attached browser; page_url mismatch, bad selector and tiny timeout return 400 with code; cleanup). NOT tested: the HTTP 200 per-field `failed / not_attempted` branch, attaching a vault by `name`, CLI `items invoke ... fill`, a non-editable fill target, TOTP fill, credential update, 1Password, hosted `collect` flow, provider configs, MPP, and every payment path (Link authorize/fill, AgentCard aliases and observer, `prepare_checkout`, `recovery_required`, Visa cards), which are docs-only because payments spend real money.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.

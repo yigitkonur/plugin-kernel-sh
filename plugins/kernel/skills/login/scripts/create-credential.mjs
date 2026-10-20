@@ -2,11 +2,14 @@
 // Create a Kernel credential from environment variables, so the password never appears on a command line
 // (the `kernel credentials create` CLI only accepts --value name=value, which leaks into shell history and `ps`).
 //
-//   SITE_USER=... SITE_PASSWORD=... node create-credential.mjs <credential-name> <domain>
+//   node --env-file=.env create-credential.mjs <credential-name> <domain>
 //
-// Environment: KERNEL_API_KEY (required), SITE_USER and SITE_PASSWORD (required), SITE_TOTP_SECRET (optional,
-// base32 or an otpauth:// URI), KERNEL_PROJECT (optional project id or exact name).
-// Prints only the credential's id, name and domain. Needs Node 18+ (global fetch); no dependencies.
+// Put the variables below in a gitignored .env (or export them in your own shell before launching your agent).
+// Do not use an inline `SITE_PASSWORD=... node ...` prefix: it lands in shell history and the tool transcript.
+// Environment: KERNEL_API_KEY (required; export it or use node --env-file=<file>), SITE_USER and SITE_PASSWORD
+// (required), SITE_TOTP_SECRET (optional, base32 or an otpauth:// URI), KERNEL_PROJECT (optional project id or
+// exact name). Prints only id, name, domain and has_totp_secret. Needs Node 20.6+ for --env-file (18+ with exported
+// variables; global fetch); no dependencies.
 const [name, domain] = process.argv.slice(2);
 const { KERNEL_API_KEY, SITE_USER, SITE_PASSWORD, SITE_TOTP_SECRET, KERNEL_PROJECT } = process.env;
 
@@ -16,7 +19,8 @@ if (!KERNEL_API_KEY) missing.push('KERNEL_API_KEY');
 if (!SITE_USER) missing.push('SITE_USER');
 if (!SITE_PASSWORD) missing.push('SITE_PASSWORD');
 if (missing.length) {
-  console.error(`create-credential: missing ${missing.join(', ')}`);
+  console.error(`create-credential: missing ${missing.join(', ')}`
+    + (KERNEL_API_KEY ? '' : ' (KERNEL_API_KEY: export KERNEL_API_KEY or use node --env-file=<file>)'));
   process.exit(2);
 }
 

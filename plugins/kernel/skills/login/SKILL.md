@@ -48,14 +48,15 @@ A connection ties one domain to one profile; a profile holds at most one connect
    ```
 2. If one matches the account the user means, reuse its `id` and `profile_name`. If several match and you cannot tell them apart, ask which profile; do not guess.
 3. If none matches, choose a stable profile name (one per end user or account). A domain-only request does not name the profile: use `<domain-slug>-main` (dots to dashes, for example `example-com-main`). For a NEW connection and profile name, state what you will create (path, profile name, domain) and proceed: creation costs nothing until used and health checks are off. Wait for a yes only when a connection or profile for that domain already exists (reuse or new), before deleting anything, or before `--save-changes` on an existing profile.
-4. Credentials for an unattended login. With a stored Kernel credential Managed Auth logs in with no person present (verified live: `AUTHENTICATED` about 45 s after `login`). Without one it waits for a person to type on the hosted page and ends `FAILED`, `error_code` `awaiting_input_timeout`, after 10 minutes. So when you hold the user's credentials and nobody will be at the page, store a credential first with the shipped script (the scripts folder next to this SKILL.md):
+4. Credentials for an unattended login. With a stored Kernel credential Managed Auth logs in with no person present (verified live: `AUTHENTICATED` about 45 s after `login`). Without one it waits for a person to type on the hosted page and ends `FAILED`, `error_code` `awaiting_input_timeout`, after 10 minutes. So when you hold the user's credentials and nobody will be at the page, store a credential first with the shipped script (in `scripts/` next to this SKILL.md; `${CLAUDE_SKILL_DIR}` is this skill's folder):
    ```bash
    node "${CLAUDE_SKILL_DIR}/scripts/create-credential.mjs" <credential-name> <domain>
    ```
-   It reads `SITE_USER`, `SITE_PASSWORD`, optional `SITE_TOTP_SECRET` and `KERNEL_API_KEY` from the environment and prints only id, name and domain. Exit 2 means a variable is missing (if `KERNEL_API_KEY` is the one, ask the user to export it); exit 1 is an HTTP error (409: the name exists, so reuse it only if it is for this domain, else pick another name). How the secrets reach it:
-   - The user exports them in the shell that launched Claude Code: run the command as is.
-   - The user keeps them in a gitignored `.env`: `node --env-file=.env "${CLAUDE_SKILL_DIR}/scripts/create-credential.mjs" <credential-name> <domain>`.
-   - The user pasted the password into the chat: write a temp env file under `umask 077` with a heredoc (never as a command-line argument), run the script with `--env-file=<file>`, `rm -f` the file, and tell the user the secret is now in the transcript, so they should rotate it if it is real.
+   It reads `SITE_USER`, `SITE_PASSWORD`, optional `SITE_TOTP_SECRET` and `KERNEL_API_KEY` from the environment and prints only `id`, `name`, `domain` and `has_totp_secret`. Exit 2 means a variable is missing (a Bash call may not see `KERNEL_API_KEY`: ask the user to export it before launching Claude Code, or put it in the env file); exit 1 is an HTTP error (409: the name exists, so reuse it only if it is for this domain, else pick another name). Never use an inline `SITE_PASSWORD=... node` prefix (it lands in shell history and the transcript). Pick how the secrets reach the script by the user's situation:
+   1. The user exported the variables in the shell that launched Claude Code: run the command above as is.
+   2. The user keeps them in a gitignored `.env`: `node --env-file=.env "${CLAUDE_SKILL_DIR}/scripts/create-credential.mjs" <credential-name> <domain>`.
+   3. The user pasted the password into the chat: write a mode-600 temp env file under `umask 077` with a heredoc (never as a command-line argument), run the script with `--env-file=<file>`, `rm -f` the file, and tell the user the secret is now in the transcript, so they should rotate it if it is real.
+
    Email, SMS and push codes still need a person even with a stored credential.
 5. Create the connection, with `--credential-name <name>` when you stored one. Pass `--no-health-checks` unless the user asked for unattended reuse: health checks and reauths each start a billed browser session (https://www.kernel.sh/docs/auth/faq).
    ```bash
@@ -63,7 +64,7 @@ A connection ties one domain to one profile; a profile holds at most one connect
      | jq '{id, status, can_reauth, can_reauth_reason, health_checks}'
    ```
    A new connection starts `NEEDS_AUTH`, `can_reauth: false`, reason `no_prior_successful_login`. That is normal. `connections create` also creates the profile.
-6. On HTTP 409 the domain and profile already have a connection. Run `kernel auth connections list --domain <domain> --profile-name <profile> -o json` and reuse the exact match (the 409 body also carries `existing_id`).
+6. On HTTP 409 (CLI output not run) the domain and profile already have a connection. Run `kernel auth connections list --domain <domain> --profile-name <profile> -o json` and reuse the exact match (the 409 body also carries `existing_id`).
 7. Options, only when needed:
    - Unattended reuse: drop `--no-health-checks`; the lowest `--health-check-interval` depends on the plan, so read the 400 message instead of guessing.
    - TOTP authenticator: set `SITE_TOTP_SECRET` for the script (see `../kernel/references/logins.md`, "MFA"). Email, SMS and push codes need a human every time.
@@ -95,7 +96,7 @@ A connection ties one domain to one profile; a profile holds at most one connect
    - User not present: do not open anything. If you hold the user's credentials, store a credential (Step 3 item 4) and run `login` once on the same connection; otherwise report `AWAITING_INPUT` and stop.
    - If the flow ends `awaiting_input_timeout`, report it (it needs a person or a stored credential) and stop; do not retry with the same setup (a second `login` times out the same way).
 5. If the flow ends `EXPIRED` or `CANCELED` (not `awaiting_input_timeout`), allow exactly ONE more `login` on the same connection (back to item 2). If it ends that way again, stop and report.
-6. Non-secret choices only: `kernel auth connections submit <id> --choice-id <choice id>`. Secrets go through the hosted page.
+6. Non-secret choices only: `kernel auth connections submit <id> --choice-id <choice id>` (untested). Secrets go through the hosted page.
 7. React embed: out of scope; see `../kernel/references/logins.md`, section "React embed".
 8. When the flow is finished, `rm -f` the two temp files.
 
@@ -104,7 +105,7 @@ A connection ties one domain to one profile; a profile holds at most one connect
 kernel auth connections get <id> -o json \
   | jq '{status, flow_status, flow_step, error_code, error_message, website_error, can_reauth, can_reauth_reason}'
 ```
-Proceed to the browser check only when `status` is `AUTHENTICATED` and, if a flow ran, `flow_status` is `SUCCESS`. Otherwise branch on `error_code` (https://www.kernel.sh/docs/auth/connection-lifecycle):
+Proceed to the browser check only when `status` is `AUTHENTICATED` and, if a flow ran, `flow_status` is `SUCCESS`. Otherwise branch on `error_code` (https://www.kernel.sh/docs/auth/connection-lifecycle; only `awaiting_input_timeout` was seen live, the rest are untested):
 
 | `error_code` | Do |
 |---|---|
@@ -158,4 +159,4 @@ Not verified: <anything unverified you relied on, or none>
 ```
 If the run stopped early, put the stop reason in `Decision` and `n/a` elsewhere.
 
-> Verified in lab 2026-10-20, SDK 0.128.0 / CLI 0.49.0: credential script, `connections create --credential-name`, `login` and `follow` reached `AUTHENTICATED` with no human; `awaiting_input_timeout` seen. CLI `submit`, the CLI 409 output and the other failure codes were not run; see verified-facts.md.
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: verified-facts.md in the plugin repository.
