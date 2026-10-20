@@ -106,11 +106,13 @@ diff diff/pref-keys-a.txt diff/pref-keys-b.txt | head -60
 
 Look at `intl.*`, `profile.default_content_setting_values`, `webrtc.*`, `extensions.settings`, `dns_over_https.*`. Preferences can hold identifiers; the diff above lists key paths only. To check a value, query one known non-sensitive path (for example `jq '.intl.accept_languages'`), never the whole file.
 
-**Local Storage and Session Storage** (LevelDB, read with `strings`). LevelDB stores a value right after its key, so extracted bytes can be a token. Therefore nothing extracted is ever printed: the raw lists stay in private files, a guard discards a whole file if any line is over 40 chars or token-shaped, and only counts, lengths and the first 8 hex characters of each sha256 are shown. That is enough to compare which keys and origins exist on each side (equal hash = same key):
+**Local Storage and Session Storage** (LevelDB, read with `strings`). LevelDB stores a value right after its key, so extracted bytes can be a token. Therefore nothing extracted is ever printed: the raw lists stay in private files, a guard discards a whole file if any line is over 40 chars or token-shaped, and only counts, lengths and the first 8 hex characters of each sha256 are shown. The private comparison files keep the full sha256 digest (an 8-hex prefix could make two distinct keys look equal); only what is printed to the user is truncated. That is enough to compare which keys and origins exist on each side (equal digest = same key). The block needs a digest tool and stops with a message if there is none:
 
 ```bash
+if command -v shasum >/dev/null 2>&1; then SHA='shasum -a 256'; elif command -v sha256sum >/dev/null 2>&1; then SHA=sha256sum; else echo "No digest tool found (need shasum or sha256sum): storage comparison not checked."; exit 1; fi
 guard() { ! awk 'length>40 || /eyJ/ || /[A-Za-z0-9+\/_=-]{24,}/ {f=1} END{exit !f}' "$@"; }
-h8() { while IFS= read -r k; do printf '%s %s\n' "$(printf %s "$k" | shasum -a 256 | cut -c1-8)" "${#k}"; done; }
+hfull() { while IFS= read -r k; do printf '%s %s\n' "$(printf %s "$k" | $SHA | cut -d' ' -f1)" "${#k}"; done; }
+show() { sed -E 's/([0-9a-f]{8})[0-9a-f]{56}/\1/g'; }
 for s in a b; do
   SS=$(find "$s" -type d -name 'Session Storage' -not -path '*/Extension*' | head -1)
   [ -n "$SS" ] && strings "$SS"/*.log "$SS"/*.ldb 2>/dev/null | grep -oE 'map-[0-9]+-[A-Za-z._0-9-]{1,41}' | sed -E 's/^map-[0-9]+-//' | sort -u > "diff/ss-raw-$s.txt"
@@ -120,13 +122,13 @@ done
 for f in ss-raw-a ss-raw-b ls-raw-a ls-raw-b; do [ -f "diff/$f.txt" ] && ! guard "diff/$f.txt" && rm -f "diff/$f.txt" && echo "DISCARDED $f"; done
 for k in ss ls; do for s in a b; do R="diff/$k-raw-$s.txt"; [ -f "$R" ] || continue
   echo "$k $s: $(grep -c . "$R") entries, $(grep -ciE 'auth|token|session|guid|sid' "$R") auth-shaped names"
-  h8 < "$R" | sort -u > "diff/$k-hash-$s.txt"
+  hfull < "$R" | sort -u > "diff/$k-hash-$s.txt"
 done; done
 rm -f diff/ss-raw-*.txt diff/ls-raw-*.txt
-for k in ss ls; do [ -f "diff/$k-hash-a.txt" ] && [ -f "diff/$k-hash-b.txt" ] && echo "$k only in A: $(comm -23 diff/$k-hash-a.txt diff/$k-hash-b.txt | grep -c .), only in B: $(comm -13 diff/$k-hash-a.txt diff/$k-hash-b.txt | grep -c .)" && diff diff/$k-hash-a.txt diff/$k-hash-b.txt | head -40; done
+for k in ss ls; do [ -f "diff/$k-hash-a.txt" ] && [ -f "diff/$k-hash-b.txt" ] && echo "$k only in A: $(comm -23 diff/$k-hash-a.txt diff/$k-hash-b.txt | grep -c .), only in B: $(comm -13 diff/$k-hash-a.txt diff/$k-hash-b.txt | grep -c .)" && diff diff/$k-hash-a.txt diff/$k-hash-b.txt | show | head -40; done
 ```
 
-The diff shows `<hash> <length>` pairs, never names. `ss` is Session Storage keys, `ls` is Local Storage origins. Never `cat` the raw files before they are removed, and do not rerun the extraction with output to the screen.
+The diff shows `<8-hex prefix> <length>` pairs, never names; the full digests stay in the private `diff/*-hash-*.txt` files. `ss` is Session Storage keys, `ls` is Local Storage origins. Never `cat` the raw files before they are removed, and do not rerun the extraction with output to the screen.
 
 A storage surface can be present yet yield nothing. In a real run, Session/Local Storage had 6 files per profile and the patterns extracted zero keys on both sides; that cannot tell "the site stores nothing there" from "the pattern missed LevelDB content" (`strings` only sees uncompressed bytes, and `.ldb` blocks may be compressed). So if a surface has files but its entries count is 0 or the line is missing, never write "no difference". Report `Session Storage: no keys extracted (files present: N)` (same for Local Storage) and fall back to file counts and `du -sk` sizes of the directory on each side, e.g. `for s in a b; do find "$s" -type d -name 'Session Storage' -not -path '*/Extension*' | head -1 | while read -r d; do echo "$s $(ls "$d" | wc -l) files $(du -sk "$d" | cut -f1) KB"; done; done`. Treat a count or size difference as a hint only, and say the key set was not compared. How to tell empty from missed: if the directories hold only tiny files (a few KB, the same on both sides), the profiles are probably empty there; if they hold tens of KB or more and still yield 0 keys, the pattern probably missed, so report "not checked" rather than "empty".
 

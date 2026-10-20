@@ -89,7 +89,8 @@ const b = await kernel.browsers.create({ stealth: true, proxy: { mode: 'direct' 
 ```ts
 const NAME = 'my-site-isp';
 let proxy: { id?: string } | undefined;
-for await (const p of kernel.proxies.list({ name: NAME })) { proxy = p; break; }       // look up by name first: names are not unique, reuse the first match
+// fail closed: do not catch here. A list error (including a key without list permission) must stop the run, never fall through to create.
+for await (const p of kernel.proxies.list({ name: NAME })) { if (p.type === 'isp') { proxy = p; break; } } // names are not unique: reuse only an ISP match
 proxy ??= await kernel.proxies.create({ type: 'isp', name: NAME }, { maxRetries: 0, timeout: 30_000 }); // only when absent; country defaults to US
 const proxyId = proxy.id!;                                // typed optional in the response
 const checked = await kernel.proxies.check(proxyId);      // returns the proxy: ip_address, status 'available'
@@ -105,6 +106,7 @@ try {
 }
 ```
 
+- An empty list from a key lacking the list grant looks like "none exist" and would create a duplicate paid proxy: list once first (`await kernel.proxies.list()`) and confirm it returns without error before relying on an empty result.
 - `proxies.create` with `{ type: 'isp', name }` worked on Hobbyist; `proxies.delete(id)` then retrieve returns 404. The docs say proxies unused for 14 days may be auto-deleted when the org has over 100; attached ones are kept.
 - Add `stealth: true` to keep the captcha solver on your own proxy.
 - Countries: docs list US, SG, GB, FR, DE; the SDK comment and CLI help also list KR. Only the default US was tested. Check `kernel proxies create --help` before relying on another country.
@@ -136,11 +138,19 @@ const browser = await kernel.browsers.create({
 }, { maxRetries: 0, timeout: 30_000 });
 try {
   const stream = await kernel.browsers.telemetry.stream(browser.session_id, { replay: 'all' });
-  for await (const frame of stream as AsyncIterable<any>) {
-    const ev = frame.event;                       // frames are wrapped: { seq, event: { type, category, data } }
-    if (ev?.category !== 'captcha') continue;     // top-level frame.type / frame.category are undefined
-    console.log(ev.type, ev.data?.status, ev.data?.task_id);
-  }
+  const timer = setTimeout(() => stream.controller.abort(), 120_000); // deadline: abort ends the loop
+  let solved = false;
+  try {
+    for await (const frame of stream as AsyncIterable<any>) {
+      const ev = frame.event;                     // frames are wrapped: { seq, event: { type, category, data } }
+      if (ev?.category === 'captcha') {           // top-level frame.type / frame.category are undefined
+        console.log(ev.type, ev.data?.status, ev.data?.task_id);
+        if (ev.type === 'captcha_challenge_result' && ev.data?.status === 'solved') { solved = true; break; }
+      }
+    }
+  } catch { /* a stream termination error (including our abort) is a normal end */ }
+  clearTimeout(timer);
+  if (!solved) throw new Error('captcha not solved before the deadline; check the page');
 } finally {
   await kernel.browsers.deleteByID(browser.session_id).catch((e) => {
     if (!(e instanceof Kernel.NotFoundError)) throw e;

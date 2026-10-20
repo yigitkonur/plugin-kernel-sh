@@ -110,7 +110,7 @@ try {
   await kernel.browsers.playwright.executors.delete('lane-1', { id_or_name: browser.session_id, close_tab: true });
 } finally {
   // deleting an executor does not delete the browser
-  await kernel.browsers.deleteByID(browser.session_id).catch(ignoreNotFound);
+  await kernel.browsers.deleteByID(browser.session_id, { timeout: 15_000 }).catch(ignoreNotFound);
 }
 ```
 (ran live, trimmed)
@@ -234,15 +234,15 @@ const ls = () => kernel.browsers.fs.listFiles(id, { path: dir }).then((f) => f ?
   (e) => { if (e instanceof Kernel.NotFoundError) return []; throw e; }); // folder not created yet
 const before = new Set((await ls()).map((f) => f.name));
 // ... click that starts the download ...
-let name = '';
-for (let i = 0; i < 150 && !name; i++) {
-  const files = await ls();
-  const fresh = files.filter((f) => !before.has(f.name));
-  const done = fresh.length > 0 && fresh.every((f) => !f.name.endsWith('.crdownload')); // wait for the whole batch
-  name = done ? (fresh.find((f) => f.size_bytes > 0)?.name ?? '') : '';
-  if (!name) await new Promise((r) => setTimeout(r, 100));
+let names: string[] = [], stable = 0, last = -1;
+for (let i = 0; i < 150 && stable < 3; i++) { // settled = no .crdownload and the count unchanged for 3 polls (or stop at an expected count/name)
+  names = (await ls()).filter((f) => !before.has(f.name)).map((f) => f.name);
+  stable = names.length > 0 && names.length === last && names.every((n) => !n.endsWith('.crdownload')) ? stable + 1 : 0;
+  last = names.length; // a zero-byte finished file is valid: do not require size > 0
+  if (stable < 3) await new Promise((r) => setTimeout(r, 100));
 }
-if (!name) throw new Error('download did not finish');
+if (stable < 3) throw new Error('download did not finish');
+const name = names[0]!; // or the one you expect
 const resp = await kernel.browsers.fs.readFile(id, { path: `${dir}/${name}` });
 const bytes = Buffer.from(await resp.arrayBuffer());
 ```

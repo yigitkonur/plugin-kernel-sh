@@ -98,6 +98,7 @@ v4 runs as a Chrome extension, so a remote browser needs the extension on **its*
 
 ```ts
 // untested (needs a model key); adapted from the docs page (the docs wrap the upload in a `loadStagehandExtension(kernel, sessionId)` helper; `STAGEHAND_EXTENSION_DIR`, `STAGEHAND_EXTENSION_ZIP` and `kernel` are assumed defined)
+import Kernel from '@onkernel/sdk';
 import { Stagehand, localBrowser } from '@browserbasehq/stagehand';
 const ignoreNotFound = (e: unknown) => { if (!(e instanceof Kernel.NotFoundError)) throw e; };
 const kb = await kernel.browsers.create(

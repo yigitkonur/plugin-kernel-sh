@@ -89,7 +89,7 @@ kernel vaults items invoke "<site>-<user-id>" "<site>-login" fill --spec-file - 
 JSON
 ```
 
-Accept only `status` `completed`; on `failed` or `unknown`, stop and check the page, do not loop. Never print or screenshot filled values. If bot detection blocks login without `--stealth`, recreate the browser with it. If still blocked, ask the user to log in by hand: run `kernel browsers view "<browser-id>" -o json | jq -r '.browser_live_view_url // empty'` (never without the jq; the JSON key is unverified, so if it prints nothing tell the user to run `kernel browsers view "<browser-id>"` themselves) and give that URL to the user in ONE message, then verify the logged-in state yourself.
+Accept only `status` `completed`; on `failed` or `unknown`, stop and check the page, do not loop. Never print or screenshot filled values. If bot detection blocks login without `--stealth`, recreate the browser with it. If still blocked, ask the user to log in by hand: run `out=$(kernel browsers view "<browser-id>" -o json) && jq -r '.browser_live_view_url // empty' <<<"$out"` (capture first so a CLI failure is not hidden by the pipe, and never without the jq; the JSON key is unverified, so if it prints nothing or the command fails tell the user to run `kernel browsers view "<browser-id>"` themselves) and give that URL to the user in ONE message, then verify the logged-in state yourself.
 
 ## 5. Explore and verify each task
 

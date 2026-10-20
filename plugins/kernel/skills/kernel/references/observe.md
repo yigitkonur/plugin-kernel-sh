@@ -199,9 +199,12 @@ try {
   if (!res.ok) throw new Error(`replay download failed: HTTP ${res.status}`);
   writeFileSync('replay.mp4', Buffer.from(await res.arrayBuffer()));
 } finally {
-  // stop (ignored if already stopped or gone), then delete: last, after the file is on disk
-  await kernel.browsers.replays.stop(replay.replay_id, { id_or_name: id }, opts).catch(() => {});
-  await kernel.browsers.deleteByID(id).catch(ignoreNotFound);
+  // stop (only NotFound is ignored: already stopped or gone), then delete last, after the file is on disk
+  try { await kernel.browsers.replays.stop(replay.replay_id, { id_or_name: id }, opts); }
+  catch (e) { // other stop failure: rethrow without deleting, so an unfinished replay is not lost (the timeout ends the browser)
+    if (!(e instanceof Kernel.NotFoundError)) { console.error('replay stop failed; browser', id, 'kept'); throw e; }
+  }
+  await kernel.browsers.deleteByID(id, { timeout: 15_000 }).catch(ignoreNotFound);
 }
 ```
 

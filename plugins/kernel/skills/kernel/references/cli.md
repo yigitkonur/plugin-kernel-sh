@@ -66,7 +66,8 @@ kernel browsers computer screenshot <id> --to ./shot.png
 
 ```bash
 out=$(kernel browsers create -o json --headless -t 120 --name my-browser --tag run=example --start-url https://example.com -y)
-id=$(printf '%s' "$out" | jq -r .session_id)   # keep only session_id; the other URLs are credentials
+id=$(printf '%s' "$out" | jq -r '.session_id // empty')   # keep only session_id; the other URLs are credentials
+[ -n "$id" ] || exit 1                          # no id parsed: stop; never run delete with an empty id (find it by --tag instead)
 printf '%s' "$out" | jq '{session_id}'          # never print cdp_ws_url, base_url or webdriver_ws_url
 # ... work with "$id" ...
 kernel browsers delete "$id"

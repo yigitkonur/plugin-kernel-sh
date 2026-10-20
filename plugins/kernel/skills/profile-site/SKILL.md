@@ -18,7 +18,7 @@ Browsers: by default both are created at once. If `concurrent_sessions_available
 The argument is the text after the skill name in the user's message (or the line starting `ARGUMENTS:`). It is a URL or hostname. If it is missing, ask for it and stop. Normalize a bare hostname to `https://<host>/`. Refuse and ask again if the URL has credentials, tokens, signed query strings, a path whose GET triggers an action, or any of `'`, `;`, `$`, a backtick or whitespace (the URL is written into a shell state file and a command). Only profile public sites the user is allowed to test (https://www.kernel.sh/docs/config-registry).
 
 Rules for the whole run:
-- Never print `KERNEL_API_KEY`, `cdp_ws_url`, `webdriver_ws_url`, `browser_live_view_url`, `base_url`, or any URL with a query string. The analyzer prints and stores no session URLs (it reports the session id only) and logs vendor URLs without query or fragment, so its logs hold no URLs; reports still hold request metadata, so never `cat` a log or report, and read them only through the `jq`/`grep` filters below.
+- Never print `KERNEL_API_KEY`, `cdp_ws_url`, `webdriver_ws_url`, `browser_live_view_url`, `base_url`, or any URL with a query string. The analyzer prints and stores no session URLs (it reports the session id only), no query strings or fragments and no cookie values, and it redacts sensitive header values. Its logs and reports still hold sanitized origin+path URLs, non-sensitive header values and request metadata, so never share them, never `cat` a log or report, and read them only through the `jq`/`grep` filters below.
 - Run one step per Bash call and keep the work directory path, run id and browser ids in `$W/state.env` (shell variables do not survive between calls). Start every call with `source "$W/state.env"` once it exists. Set the Bash timeout to 600000 ms for step 5.
 - If any step after step 4 fails, go straight to step 7 (cleanup), then report. Never leave a browser alive. Total budget: abort and clean up at 15 minutes (`$(( $(date +%s) - START ))` above 900; START is in `state.env` after step 4).
 
@@ -108,7 +108,7 @@ KERNEL_BROWSER_ID="$STEALTH_ID" TARGET_URL="$TARGET_URL" BROWSER_MODE=stealth OU
 grep -E 'BLOCKED|DATADOME|Vendor analysis completed|Test failed' "$W/stealth.log" | sed -E 's/\?[^ "]*/?***/g' | head -n 15
 ```
 
-The logs hold no URLs (no session URLs; vendor URLs are origin and path only), so keeping them in `$W` is fine. Then the same with `NORMAL_ID`, `BROWSER_MODE=normal`, `normal.log`. A non-zero exit or a `Test failed` line: show the masked grep output, go to step 7, and report that browser's result as "no data".
+The logs hold no session URLs, query strings, cookie values or sensitive header values, but they do hold sanitized origin+path URLs and non-sensitive header values, so keep them in `$W` and do not share them. Then the same with `NORMAL_ID`, `BROWSER_MODE=normal`, `normal.log`. A non-zero exit or a `Test failed` line: show the masked grep output, go to step 7, and report that browser's result as "no data".
 
 ## 6. Compare, without printing secrets
 
@@ -119,7 +119,7 @@ source "$W/state.env"
 for m in stealth normal; do
   R=$(ls -t "$W/output/$HOST/$m"/report-*.json 2>/dev/null | head -n 1)
   [ -n "$R" ] || { echo "no $m report"; continue; }
-  # the saved report holds no session URLs and no cookie values or sensitive header values (names and vendor evidence only)
+  # the saved report holds no session URLs, query strings, cookie values or sensitive header values; it does hold origin+path URLs and non-sensitive header values
   echo "=== $m ==="
   jq '{verdict: .summary.verdict, isBlocked: .summary.isBlocked, hasSuspicion: .summary.hasSuspicion, vendors: .summary.vendorNames, blockedPages: [.summary.blockedPages[]? | {page, blockType, vendor, confidence}], blockedVendors: .summary.blockedVendors, suspicious: [.summary.suspiciousPages[]? | {page, blockType}]}' "$R"
   jq -r '.vendorDetections | to_entries[] | "\(.key): \([.value.products[].product] | unique | join(", "))"' "$R"
@@ -204,7 +204,7 @@ Stealth effect: <effective | no effect | inconclusive> because <one line>
 Recommended configuration: <rung and create params, or "normal headful">
 Next steps: <up to 3 bullets, one per detected vendor or block>
 Cleanup: <ids deleted, active browsers left with run=<RUN>: 0 or the ids>
-Evidence kept at: <$W/output path> (contains cookie names, header names and vendor evidence, no values or session URLs; still do not share)
+Evidence kept at: <$W/output path> (contains cookie names, header names, non-sensitive header values, origin+path URLs and vendor evidence; no cookie values, query strings or session URLs; do not share)
 Not verified: <list anything skipped or failed>
 ```
 

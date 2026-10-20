@@ -14,6 +14,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, '..');
 // a fresh directory under the cwd (so node_modules resolves from the cwd); only this directory is ever removed
 const work = mkdtempSync(resolve(process.cwd(), '.snippet-check-'));
+process.on('exit', () => rmSync(work, { recursive: true, force: true })); // every exit path, including a read error below
 const args = process.argv.slice(2);
 const all = args.includes('--all');
 const fileArgs = args.filter((a) => !a.startsWith('--'));

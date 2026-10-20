@@ -43,7 +43,7 @@ const browser = await kernel.browserPools.acquire(
   POOL,
   {
     acquire_timeout_seconds: 60,
-    tags: { run: 'job-42' }, // lease-only tags: makes the lease findable
+    tags: { run: 'job-42' }, // lease-only tags: use a unique lease tag so a lease whose response was lost can be found
   },
   { maxRetries: 0, timeout: 90_000 }, // timeout must exceed acquire_timeout_seconds
 );
@@ -59,7 +59,7 @@ try {
 - **Treating 204 as an error or a hang.** When no browser is ready, `acquire` waits `acquire_timeout_seconds`, then returns HTTP 204; the SDK type is `BrowserPoolAcquireResponse | null`. Verified live: 204 after 5.8 s on a 5 s wait, and no `Retry-After` header. Retry yourself a bounded number of times (loop below), do not tighten the loop.
 - **Pools in the request path** (create/delete per request defeats the point).
 - **Expecting idle pool browsers to carry your run tag.** Only an acquired lease can be tagged (acquire-time `tags`; pool create has no `tags` field), so `browsers list --tag run=<id>` finds leases, not warm idle browsers. Reconcile a pool by `retrieve(pool)` counts (`acquired_count`) and by deleting the pool last. (unverified live: that an idle browser cannot be found by tag.)
-- **Forgetting release.** An acquired browser stays out of the pool until you release it or its `timeout_seconds` idle timer (default 600, starts only after acquire) destroys it and the pool replaces it. The timeout is a backstop.
+- **Forgetting release.** An acquired browser stays out of the pool until you release it or its `timeout_seconds` idle timer (default 600, starts only after acquire) destroys it and the pool replaces it. The timeout is a backstop. If an `acquire` response is lost, no id reached you: the unique acquire-time lease tag is how to find and release it, using the same list-all-then-delete sweep as below.
 - **Leaving a pool behind.** `browserPools.delete(name)` while a browser is leased is refused with 400 (not 409): "Cannot delete pool. 1 browser(s) are currently in use. Use force=true to terminate them." `delete(name, { force: true })` kills the leased browser too (it 404s afterwards).
 
 ```ts
@@ -244,12 +244,16 @@ A create that timed out client-side may still have made a browser, and `id` is o
 ```ts
 // post-run sweep: list by the unique run tag, delete only those
 const runId = process.env.RUN_ID!; // unique per run, e.g. a UUID set before the run
-for await (const b of kernel.browsers.list({ status: 'active', tags: { run: runId } })) {
-  if (b.tags?.run !== runId) continue; // never delete what the filter did not prove is ours
-  await kernel.browsers.deleteByID(b.session_id).catch((e) => {
-    if (!(e instanceof Kernel.NotFoundError)) throw e;
-  });
+const ids: string[] = [];
+for await (const b of kernel.browsers.list({ status: 'active', tags: { run: runId } })) { // read every page first: deleting shifts offsets
+  if (b.tags?.run === runId) ids.push(b.session_id); // never delete what the filter did not prove is ours
 }
+const failed: unknown[] = [];
+for (const sid of ids) {
+  try { await kernel.browsers.deleteByID(sid, { timeout: 15_000 }); }
+  catch (e) { if (!(e instanceof Kernel.NotFoundError)) failed.push(e); } // keep going; report after the loop
+}
+if (failed.length) throw new Error(`${failed.length} of ${ids.length} sweep deletes failed`);
 ```
 
 **If** you get 429 on create -> **Do** queue on your side (BullMQ or any queue, worker concurrency at or below `concurrent_sessions_available` or pool size), back off, honor `Retry-After`. The SDK already retries 429 up to 2 times honoring `Retry-After`, then throws `RateLimitError` with the headers. -> **Avoid** tightening the retry loop (a 429 means the org is over budget for the minute) and hand-rolled retry stacked on the SDK's.

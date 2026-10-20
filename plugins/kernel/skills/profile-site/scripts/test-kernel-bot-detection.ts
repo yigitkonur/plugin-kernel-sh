@@ -210,7 +210,7 @@ function safeUrl(raw: string): string {
     if (!['http:', 'https:', 'ws:', 'wss:'].includes(u.protocol)) return `${u.protocol}[omitted]`;
     return `${u.origin}${u.pathname}`;
   } catch {
-    return raw.split(/[?#]/)[0];
+    return '<unparseable-url>';
   }
 }
 
@@ -219,6 +219,25 @@ function safeUrl(raw: string): string {
  */
 function redactUrls(text: string): string {
   return text.replace(/\b(?:https?|wss?):\/\/[^\s"'<>)]+/gi, (m) => safeUrl(m));
+}
+
+/**
+ * Mask secret values inside free text: bearer/basic credentials, key=value pairs for token, password,
+ * secret, api key and jwt names, JWT literals and `sk_` keys.
+ */
+function redactSecrets(text: string): string {
+  return text
+    .replace(/\b(bearer|basic)\s+[A-Za-z0-9._~+\/=-]+/gi, '$1 [redacted]')
+    .replace(/\b([\w.-]*(?:token|password|passwd|secret|api[-_ ]?key|jwt)[\w.-]*)(["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;&"']+)/gi, '$1$2[redacted]')
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g, '[redacted]')
+    .replace(/\bsk_[A-Za-z0-9_-]+/g, '[redacted]');
+}
+
+/**
+ * Free text that is logged or stored: URLs reduced to origin + path, then secret values masked.
+ */
+function redactText(text: string): string {
+  return redactSecrets(redactUrls(text));
 }
 
 /**
@@ -236,7 +255,7 @@ function redactHeaders(headers: Record<string, string>): Record<string, string> 
 }
 
 function log(message: string, level: 'INFO' | 'WARN' | 'ERROR' = 'INFO'): void {
-  message = redactUrls(message);
+  message = redactText(message);
   const timestamp = new Date().toISOString();
   const colors = {
     INFO: '\x1b[36m',
@@ -1326,7 +1345,7 @@ async function runTest(): Promise<void> {
       const entry: ConsoleEntry = {
         timestamp: new Date().toISOString(),
         type: msg.type(),
-        text: redactUrls(msg.text()),
+        text: redactText(msg.text()),
         location: { ...msg.location(), url: safeUrl(msg.location().url) },
       };
       collectedData.consoleMessages.push(entry);
@@ -1341,8 +1360,8 @@ async function runTest(): Promise<void> {
     page.on('pageerror', (error: Error) => {
       const entry: ErrorEntry = {
         timestamp: new Date().toISOString(),
-        message: redactUrls(error.message),
-        stack: error.stack === undefined ? undefined : redactUrls(error.stack),
+        message: redactText(error.message),
+        stack: error.stack === undefined ? undefined : redactText(error.stack),
       };
       collectedData.errors.push(entry);
       log(`[PAGE ERROR] ${error.message}`, 'ERROR');
@@ -1698,7 +1717,7 @@ async function runTest(): Promise<void> {
     log('='.repeat(60));
   } catch (error) {
     log(`Test failed: ${(error as Error).message}`, 'ERROR');
-    console.error(redactUrls(String((error as Error).stack ?? error)));
+    console.error(redactText(String((error as Error).stack ?? error)));
     process.exit(1);
   }
 }
@@ -1708,7 +1727,7 @@ async function runTest(): Promise<void> {
 runTest().then(
   () => process.exit(0),
   (error) => {
-    console.error(redactUrls(String((error as Error)?.stack ?? error)));
+    console.error(redactText(String((error as Error)?.stack ?? error)));
     process.exit(1);
   },
 );
