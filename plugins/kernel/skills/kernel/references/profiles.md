@@ -65,7 +65,7 @@ CLI: `kernel profiles create --name my-profile`, `kernel browsers create --profi
 ## One script that logs in only when the profile is empty
 
 **If** a single unattended script must log in once and reuse the session on later runs
-**Do** create the profile (ignore the conflict), open a browser with `save_changes: true`, detect the login state inside the page, log in only if needed, and `deleteByID` in `finally`. One writer per run, runs sequential. Verified live: run 1 logged in, run 2 reused the profile and skipped the login. For throwaway or demo accounts only; the password handling (env at run time, `JSON.stringify` into `code`, never logged or committed) and the real-account paths are in `references/logins.md`, "Scripted login once, reuse the profile".
+**Do** create the profile (ignore the conflict), open a browser with `save_changes: true`, detect the login state inside the page, log in only if needed, and `deleteByID` in `finally`. One writer per run, runs sequential. Verified live: run 1 logged in, run 2 reused the profile and skipped the login. For throwaway or demo accounts only; the password handling (env at run time, `JSON.stringify` into `code`, never logged or committed, `control` telemetry off on that browser because it stores the submitted code) and the real-account paths are in `references/logins.md`, "Scripted login once, reuse the profile".
 **Avoid** two overlapping runs (second writer overwrites the first), and a password in a file, a log or a command line.
 **Source** https://www.kernel.sh/docs/browsers/profiles/save-and-reuse
 
@@ -89,7 +89,10 @@ try {
   if (!(e instanceof ConflictError)) throw e;
 }
 const browser = await kernel.browsers.create(
-  { headless: true, timeout_seconds: 300, profile: { name: PROFILE, save_changes: true }, tags: { run: 'login' } },
+  {
+    headless: true, timeout_seconds: 300, profile: { name: PROFILE, save_changes: true }, tags: { run: 'login' },
+    telemetry: { browser: { control: { enabled: false } } }, // control telemetry would store the code, password included
+  },
   { maxRetries: 0, timeout: 30_000 },
 );
 try {
@@ -221,4 +224,4 @@ CLI: `kernel profiles download <name> --to <dir>` extracts into `<dir>` (`--form
 
 Source: `references/does-not-exist.md` (persistent names removed 2026-05-21; `browser.profile.origins` is a docs proposal, not an API).
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.129.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

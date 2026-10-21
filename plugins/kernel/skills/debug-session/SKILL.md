@@ -180,4 +180,4 @@ Next step: <one thing you can run for the user, if any>
 
 Never include Kernel-issued session URLs (CDP, live view, replay, hosted login), keys, cookies or raw event payloads in that report. Docs URLs are fine.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.129.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

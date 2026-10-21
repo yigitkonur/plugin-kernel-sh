@@ -139,7 +139,7 @@ Keep the vault id, card key, browser id and last event id until reconciled. **So
 
 **If** the user connects a payment method
 **Do** list the vault's items and group wallets by `spec.provider`: none -> offer to connect; `pending_authorization` -> resume the existing hosted action; `connected` -> reuse. Re-check immediately before creating. Wait for `connected` before preparing a purchase. Present the hosted action URL from your own authenticated endpoint (bound to user, vault, item; short TTL; our recommendation: `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, as the docs require on the redirect response in https://www.kernel.sh/docs/browsers/enable-payments-in-browser-agent).
-**Avoid** a second wallet under a different key (the API makes item keys unique, not providers); deleting a wallet (it invalidates its cards); letting the agent or its browser see the action URL.
+**Avoid** logging or storing in browser storage a Kernel wallet's `capture_token` (0.129.0 types: a secret bearer capability for embedded card capture with `@onkernel/vault-react`; treat it like the enrollment URL); a second wallet under a different key (the API makes item keys unique, not providers); deleting a wallet (it invalidates its cards); letting the agent or its browser see the action URL.
 **Source** https://www.kernel.sh/docs/integrations/wallets/overview
 
 | Need | Provider | Notes |
@@ -206,4 +206,4 @@ Authorize errors that leave the card `requested` and safe to authorize again: `p
 
 - Known execution failures can return HTTP 200 with `failed` or `unknown`; validation errors before any write are 400/403/404/409 and nothing is written (the SDK `performOperation` doc comment says both). Verified live: `page_not_found`, `element_not_found` and `timeout` came back as HTTP 400 with `{ code, message }`. The 403, 404 and 409 cases are docs-only. Branch on both.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.129.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

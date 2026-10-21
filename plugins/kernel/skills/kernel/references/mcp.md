@@ -96,4 +96,4 @@ Never print the session id. Responses are SSE: parse the `data: ` line.
 - Whether Kernel OAuth passes a strict RFC 9207 issuer check: (unverified); the docs recommend an API key if it does not.
 - MCP `manage_replays`, file read/download, and create/delete without `context`: (untested).
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.129.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

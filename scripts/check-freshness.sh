@@ -32,8 +32,13 @@ echo "- docs changelog newest entry: recorded '${vtop:-?}', now '${ltop:-?}'" >>
 { echo; echo "## Docs changelog (top of page)"; printf '%s\n' "$cl" | head -15; } >> "$report"
 cat "$report"
 if [ "${1:-}" = "--issue" ] && [ $changed = 1 ]; then
-  if gh issue list --label freshness --state open --json number --jq 'length' 2>/dev/null | grep -qx 0; then
-    gh issue create --title "Kernel moved: re-verify the plugin (SDK $lsdk, CLI $lcli)" --label freshness --body-file "$report" || true
+  title="Kernel moved: re-verify the plugin (SDK ${lsdk:-?}, CLI ${lcli:-?}, changelog ${ltop:-?})"
+  # one issue per state of Kernel: none while a freshness issue is open, and never twice for the same state
+  # (a closed issue with this exact title means that state was already handled)
+  open_n="$(gh issue list --label freshness --state open --json number --jq 'length' 2>/dev/null)"
+  seen="$(gh issue list --label freshness --state all --limit 200 --json title --jq '.[].title' 2>/dev/null | grep -cxF -- "$title")"
+  if [ "$open_n" = 0 ] && [ "${seen:-0}" = 0 ]; then
+    gh issue create --title "$title" --label freshness --body-file "$report" || true
   fi
 fi
 rm -f "$report"; exit 0

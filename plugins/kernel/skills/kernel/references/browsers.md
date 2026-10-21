@@ -82,7 +82,7 @@ For new code prefer `playwright.execute` over CDP (`references/control.md`). If 
 | `viewport` is the window, not the page. Headful 1280x720 gave `innerWidth` 1280, `innerHeight` 633 (UI takes about 87 px) | verified live (width matches, height short) |
 | Headless: viewport is echoed in the response, but the window stayed 800x600 (`innerWidth` 800). `page.setViewportSize({ width, height })` fixed it at page level | verified live; contradicts the docs' "matches the viewport" for headless |
 | `browsers.update` with a new viewport mid-session did not drop the CDP connection, headless or headful, and no Chromium restart was seen (headless only: a window marker survived) | verified live; contradicts the docs' restart warning for these cases. Not tested: `force: true`, live view or replay active, reconnect with the old URL (the `cdp_ws_url` value changed) |
-| 1280x720 (create) and 1024x768 (update) were accepted live; `refresh_rate` is auto-assigned (60 for 1280x720). `refresh_rate` only matters for live view | verified live, SDK types |
+| 1280x720 (create) and 1024x768 (update) were accepted live; `refresh_rate` is auto-assigned (60 for 1280x720; the 0.129.0 types say GPU browsers default to 60 and others derive it from the size). `refresh_rate` only matters for live view | verified live, SDK types |
 | Exact page size wanted -> kiosk mode removes the UI (kiosk create restarts Chromium: several seconds) | docs viewport and live-view (untested) |
 | Extensions: `extensions: [{ name }]` at create; `kernel browsers create --extension <name>`; loading into a running browser (`kernel browsers extensions upload <session_id> <dir>`) restarts Chromium and may disrupt CDP | docs extensions (untested) |
 
@@ -103,7 +103,7 @@ For new code prefer `playwright.execute` over CDP (`references/control.md`). If 
 **If** automation code or viewers sit far from us-east -> **Do** set `region` at create (`'us-east' | 'us-west' | 'eu-west' | 'ap-southeast'` in the SDK type; the docs list the first, third and fourth; non-default regions need an eligible plan). **Avoid** treating it as data residency or changing it later: it is fixed at create, create a new browser instead. -> **Source** https://www.kernel.sh/docs/browsers/regions, SDK types (untested; `region` came back in the create response)
 
 - Default is us-east. Regions cover CPU browsers, pools and Managed Auth; GPU, Apps and invocations are not covered yet.
-- SDK 0.128.0 adds `location` (`locale`, `timezone`) on create. Verified live (SDK version of that run not recorded; pinned 0.127.0): the default response carries `locale_source: 'metro'` and the page matches; setting an override returned 400 "browser location is not enabled for this organization" (org-gated, not visible in entitlements). The default location already matches a normal human user (timezone and locale come from the browser's region metro); an override is org-gated.
+- SDK 0.128.0 adds `location` (`locale`, `timezone`) on create. Verified live (SDK version of that run not recorded; pinned 0.127.0): the default response carried `locale_source: 'metro'` and the page matched (SDK 0.129.0 renames that value to `default`, so branch on `locale_source !== 'override'`, not on either name); setting an override returned 400 "browser location is not enabled for this organization" (org-gated, not visible in entitlements). The default location already matches a normal human user (timezone and locale come from the browser's region metro); an override is org-gated.
 
 ## B10. Create speed
 
@@ -129,4 +129,4 @@ Embedding in an iframe and parent-frame events: see the docs page.
 
 ---
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.129.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

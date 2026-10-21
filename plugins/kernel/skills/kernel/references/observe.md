@@ -137,7 +137,7 @@ Captcha events (verified live, `stealth: true` + captcha telemetry, which is in 
 
 **If** the site handles PHI, card data, credentials or personal data. **Do**
 - Use the operational categories only (`control`, `connection`, `system`, `captcha`); skip `network`, `console`, `page`, `interaction`, `screenshot`.
-- Pass secrets into Playwright code through variables, never literals. `control` records the submitted source in `api_call.data.code` (capped at 8 KB). This is also why credentials never belong in `playwright.execute` code.
+- Keep secrets out of `playwright.execute` code. The code runs in the VM, so a value from your process can only reach it inside the code string, and `control` records that string in `api_call.data.code` (capped at 8 KB; SDK type doc). Use vault fill or Managed Auth for real credentials. If a throwaway login must go through `code`, create that browser with `telemetry: { browser: { control: { enabled: false } } }` (`references/logins.md`).
 - For zero retention, talk to Kernel: ZDR is enterprise-only, set per org via support, and suppresses recordings, live view streams and telemetry (https://www.kernel.sh/docs/info/zero-data-retention). Under a BAA, `network`, `console` and `screenshot` are disabled by Kernel (https://www.kernel.sh/docs/browsers/telemetry/categories, Data sensitivity); keep regulated values out of code you submit.
 
 **Source** https://www.kernel.sh/docs/browsers/telemetry/categories (Data sensitivity); https://www.kernel.sh/docs/info/zero-data-retention.
@@ -214,7 +214,7 @@ After the browser is deleted, a replay that was stopped first can still be liste
 
 ## O8. Secrets in telemetry
 
-**If** you capture `control`. **Do** read passwords and tokens inside the page or from variables your code reads at run time; use vaults or Managed Auth for site logins (`references/logins.md`, `references/vaults-payments.md`). **Avoid** literals in `playwright.execute({ code })`: the code is stored in telemetry as `api_call.data.code`. Typed text is not captured by `cdp_command` (lengths only), and password fields are suppressed in `interaction_*` events. (api_call code capture: docs only, not read back). Source: https://www.kernel.sh/docs/browsers/telemetry/categories.
+**If** you capture `control` (on by default). **Do** use vaults or Managed Auth for site logins (`references/logins.md`, `references/vaults-payments.md`); for a throwaway login whose password must travel in `code`, turn `control` off on that browser (`control: { enabled: false }`). **Avoid** secrets in `playwright.execute({ code })` with `control` on: the code is stored in telemetry as `api_call.data.code`, and a value embedded with `JSON.stringify` is part of that code. Typed text is not captured by `cdp_command` (lengths only), and password fields are suppressed in `interaction_*` events. (api_call code capture: docs and SDK type doc, not read back live). Source: https://www.kernel.sh/docs/browsers/telemetry/categories.
 
 ## O9. Choosing categories at create
 
@@ -233,4 +233,4 @@ Categories in one line each: `control` (api_call, cdp_command), `connection` (cd
 
 **If** the code runs as a Kernel App. **Do** use `kernel.invocations.follow(invocationId)` live; for past output the CLI needs the invocation id (`kernel logs <app> -i <invocation_id>`; `--since` alone printed only headers when tried). See `references/apps.md`. Source: https://www.kernel.sh/docs/apps/logs.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.129.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

@@ -195,4 +195,4 @@ try {
 - Keep the Kernel key out of framework configs; `new Kernel()` reads `KERNEL_API_KEY`. Model keys belong in the environment, not in code.
 - Hand a framework `cdp_ws_url` only in-process; never print it, log it or pass it as a CLI argument.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.129.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
