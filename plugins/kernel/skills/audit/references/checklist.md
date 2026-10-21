@@ -2,7 +2,7 @@
 
 Used by `/kernel:audit`. One row per judgment. Each is: **If** you see this -> **Look for** the evidence -> **Fix** -> **Source**. Report a row only with a `file:line`. Single-regex rules (deprecated names, key literals, logged URLs) come from `kernel-plugin lint` (`rules/stale-api.tsv`); this file covers what the linter misses and how to judge its hits.
 
-Rows written against @onkernel/sdk 0.128.0. A project pinned to an older SDK (for example `^0.96.0`) may differ in field names and defaults: report that as an uncertainty, not a finding.
+Rows written against @onkernel/sdk 0.128.0 and re-checked on 0.129.0. A project pinned to an older SDK (for example `^0.96.0`) may differ in field names and defaults: report that as an uncertainty, not a finding.
 
 Severity guide: **high** = leaks money, slots, secrets or data now; **med** = breaks under load or on failure; **low** = hygiene.
 
@@ -144,4 +144,4 @@ A hit inside a comment, a string that documents the old name, or a test fixture 
 
 Docs only, unverified: payments (C09), SDK retry on real 5xx (C06), sync invoke past 100 s (C05), project 403 (C13), duplicate MCP servers (C14), React token flow (C12). Checks C01, C02, C03, C07, C08, C16, C17 and the K003 removal were verified live.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.129.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

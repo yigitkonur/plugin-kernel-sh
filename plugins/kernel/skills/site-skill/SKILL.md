@@ -63,7 +63,7 @@ kernel browsers playwright execute <browser-id> -o json 'await page.goto("<site-
 kernel browsers computer screenshot <browser-id> --to <S>/state.png
 ```
 
-Read the PNG to judge the state. If login is needed, use the vault. Exception: a throwaway or demo account whose credentials must reach a script and no vault is wanted. Follow the secrets policy in `../kernel/SKILL.md`: a password never goes in project code or on a command line, so use the SDK's `playwright.execute` (the CLI form puts the code on a command line), read the secret from the environment at run time and put it into the `code` string with `JSON.stringify` (it travels in the request body); never log that string, never commit it, never write values into the generated skill. A password pasted in chat is already in the transcript: keep it out of files, shell history and later commands. Inspect the login form and note field names, types and sensitivity. Create the credential item without values (unverified CLI path; `fields` is an ordered array with `name`):
+Read the PNG to judge the state. If login is needed, use the vault. Exception: a throwaway or demo account whose credentials must reach a script and no vault is wanted. Follow the secrets policy in `../kernel/SKILL.md`: a password never goes in project code or on a command line, so use the SDK's `playwright.execute` (the CLI form puts the code on a command line), read the secret from the environment at run time and put it into the `code` string with `JSON.stringify` (it travels in the request body), on a browser created with `control` telemetry off (it stores the submitted code; `../kernel/references/logins.md`); never log that string, never commit it, never write values into the generated skill. A password pasted in chat is already in the transcript: keep it out of files, shell history and later commands. Inspect the login form and note field names, types and sensitivity. Create the credential item without values (unverified CLI path; `fields` is an ordered array with `name`):
 
 ```bash
 kernel vaults credentials create "<site>-<user-id>" "<site>-login" --spec-file - <<'JSON'
@@ -186,4 +186,4 @@ Cleaned up: <what was deleted; what was left and why>
 Open questions: <decisions for the user>
 ```
 
-Verified 2026-10-20, SDK 0.128.0 / CLI 0.49.0; evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
+Verified live 2026-10-20; types re-checked on SDK 0.129.0 / CLI 0.49.0; evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

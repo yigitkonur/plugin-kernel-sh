@@ -4,7 +4,7 @@ Read when you suspect a reference is out of date and need to know what it was ch
 
 | Item | Version or date |
 |---|---|
-| `@onkernel/sdk` | 0.128.0 (2026-10-19); lab probes ran on 0.127.0 and the 0.127 to 0.128 type diff was reviewed |
+| `@onkernel/sdk` | 0.129.0 (2026-10-21); lab probes ran on 0.127.0; the 0.127 to 0.128 and 0.128 to 0.129 type diffs were reviewed (0.129: `locale_source` value `metro` renamed `default`, GPU refresh-rate default, wallet `capture_token`) |
 | `kernel` CLI | 0.49.0 (2026-10-14) |
 | Hosted MCP server | source commit 5c0e58b (2026-10-19) |
 | Kernel docs | https://www.kernel.sh/docs (llms-full.txt), fetched 2026-10-20 |

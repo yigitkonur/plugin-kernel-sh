@@ -148,4 +148,4 @@ Apply live view and replay rules to each viewer's network, not only the agent's 
 
 ---
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.129.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

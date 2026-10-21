@@ -1,77 +1,124 @@
 # plugin-kernel-sh
 
-A Claude Code plugin that makes coding agents use [Kernel](https://kernel.sh) cloud browsers correctly in TypeScript projects. It tells the agent *when and why* to use each Kernel capability, catches deprecated fields as they are written, keeps API keys out of code, and gives you workflows for the situations that actually hurt: a failed session, a login, a blocked site, a review.
+a claude code plugin that makes coding agents use [kernel](https://kernel.sh) cloud browsers the right way in typescript projects. it tells the agent *when and why* to reach for each kernel feature, flags deprecated fields the moment they get written, keeps api keys out of your code, and ships workflows for the stuff that actually hurts: a failed session, a login, a site that blocks you, a pre-merge review.
 
-The facts in it were checked against `@onkernel/sdk`, the `kernel` CLI and live runs on a real account (see [verified-facts.md](verified-facts.md)). What was not checked is marked "(unverified)" or "(untested)" in the text; the list is under "Verification status".
+the facts in here were checked against `@onkernel/sdk`, the `kernel` cli and live runs on a real account (receipts: [verified-facts.md](verified-facts.md)). anything that wasn't run live says "(unverified)" or "(untested)" right in the text. no vibes-based docs.
 
-## Install
+## install
+
+one command from your terminal, and you're set:
+
+```sh
+claude plugin install kernel --marketplace yigitkonur/plugin-kernel-sh
+```
+
+that adds the `plugin-kernel-sh` marketplace (user scope) and installs `kernel@plugin-kernel-sh` in one go. restart claude code afterwards so the hooks and skills load.
+
+prefer the classic two-step? same result:
 
 ```sh
 claude plugin marketplace add yigitkonur/plugin-kernel-sh
 claude plugin install kernel@plugin-kernel-sh
 ```
 
-or inside Claude Code: `/plugin marketplace add yigitkonur/plugin-kernel-sh`, then `/plugin install kernel@plugin-kernel-sh`.
+already inside a session? use the slash commands:
 
-Requirements: macOS or Linux (the hooks are POSIX `sh`; Windows is untested); Claude Code 2.1.302 or later (that is the version the hooks were run on; they use the `command` plus `args` form). The hooks work without `jq`; the workflow skills need it and say so when it is missing. The workflows use the `kernel` CLI (`brew install kernel/tap/kernel` or `npm i -g @onkernel/cli`); the plugin never installs it for you.
+```text
+/plugin marketplace add yigitkonur/plugin-kernel-sh
+/plugin install kernel@plugin-kernel-sh
+```
 
-Authenticate the bundled Kernel MCP server once: run `/mcp`, pick `kernel`, and sign in with OAuth. Until then it shows as needing authentication and adds no tools. The Bearer-key variant (for CI, or a client that rejects the OAuth flow) was verified live; the interactive OAuth sign-in follows Kernel's documentation but was not completed end-to-end during this plugin's verification (see "Verification status").
+rolling it out to the whole team: run this in the repo, then commit `.claude/settings.json` (it now declares the marketplace and enables the plugin for that project):
 
-## What you get
+```sh
+claude plugin marketplace add yigitkonur/plugin-kernel-sh --scope project
+claude plugin install kernel@plugin-kernel-sh --scope project
+```
 
-**Knowledge skill: `kernel`.** Loaded automatically when code or commands create, drive, debug or scale Kernel browsers. A short decision tree and non-negotiables, plus references the agent reads on demand: SDK client, browsers, control surfaces, unblocking (stealth, proxies, captcha), logins, profiles, vaults and payments, scale and pools, Apps, observability, account, CLI, MCP, integrations, an API map, and a list of things that do not exist.
+check it landed:
 
-**Workflow skills**
+```sh
+claude plugin details kernel
+```
 
-| Command | Who triggers it | What it does |
+you should see `kernel <version>` (the number in [`VERSION`](VERSION)), 7 skills, 4 hooks, 1 mcp server and about 481 tokens always-on.
+
+staying fresh, or bailing:
+
+```sh
+claude plugin marketplace update plugin-kernel-sh && claude plugin update kernel@plugin-kernel-sh
+claude plugin uninstall kernel@plugin-kernel-sh
+```
+
+every command in this section was run against this repo from a clean claude code config (claude code 2.1.304), and the flags match `claude plugin --help`.
+
+### what you need
+
+- macos or linux. the hooks are posix `sh`; windows is untested.
+- claude code 2.1.302 or newer: that's the version the hooks were run on, and they use the `command` + `args` hook form.
+- `jq` and the `kernel` cli for the workflow skills (`brew install kernel/tap/kernel` or `npm i -g @onkernel/cli`). the plugin never installs anything behind your back. the hooks run fine without `jq`.
+- `KERNEL_API_KEY` in your environment (or a gitignored `.env`) for your own code and the workflows. never paste it into chat.
+
+### the kernel mcp server
+
+run `/mcp`, pick `kernel`, and sign in with oauth once. until you do, it shows "needs authentication" and adds zero tools. the bearer-key variant (for ci, or a client that chokes on oauth) was verified live. the interactive oauth sign-in follows kernel's docs but wasn't completed end to end here (see "receipts").
+
+## what you get
+
+**knowledge skill: `kernel`.** loads by itself when code or commands create, drive, debug or scale kernel browsers. it's a short decision tree plus the non-negotiables, and the agent reads deeper references on demand: sdk client, browsers, control surfaces, unblocking (stealth, proxies, captcha), logins, profiles, vaults and payments, scale and pools, apps, observability, account, cli, mcp, integrations, an api map, and a list of things that straight up do not exist.
+
+**workflow skills**
+
+| command | who triggers it | what it does |
 |---|---|---|
-| `/kernel:debug-session <session-id>` | you or the agent | Reads session state and telemetry (still readable after the browser is deleted), replays and logs; diagnoses and proposes a fix |
-| `/kernel:login <domain>` | you or the agent | Decides whether browser auth is needed at all, then sets up Managed Auth or a vault fill and relaunches a logged-in browser |
-| `/kernel:audit [path]` | you | Read-only review of this project's Kernel usage with `file:line` findings and sources |
-| `/kernel:profile-site <url>` | you | Finds the bot-detection vendors on a site and the Kernel configuration that beats them |
-| `/kernel:diff-profiles <a> <b>` | you | Compares two profiles without printing values |
-| `/kernel:site-skill` | you | Turns a workflow that worked into a reusable skill for that site |
+| `/kernel:debug-session <session-id>` | you or the agent | reads session state and telemetry (still readable after the browser is deleted), replays and logs, then diagnoses and proposes a fix |
+| `/kernel:login <domain>` | you or the agent | first decides whether you even need browser auth, then sets up managed auth or a vault fill and relaunches a logged-in browser |
+| `/kernel:audit [path]` | you | read-only review of this project's kernel usage, with `file:line` findings and sources |
+| `/kernel:profile-site <url>` | you | finds the bot-detection vendors on a site and the kernel config that gets past them |
+| `/kernel:diff-profiles <a> <b>` | you | compares two profiles without ever printing values |
+| `/kernel:site-skill` | you | turns a workflow that worked into a reusable skill for that site |
 
-**Hooks** (four handlers, all fail-open; set `KERNEL_PLUGIN_HOOKS=off` to silence every one)
+**hooks** (four handlers, all fail-open; set `KERNEL_PLUGIN_HOOKS=off` to mute every one)
 
-| When | What | Why |
+| when | what | why |
 |---|---|---|
-| Session start, subagent start | In a project that uses Kernel, injects a ~1.1k-character primer: delete browsers in `finally`, default control surface, no secrets in code, verify names instead of remembering | The agent cannot know the project uses Kernel until it opens a file; subagents do not inherit session context. Nothing is injected in other projects. |
-| After an edit | Reports a deprecated Kernel identifier only if the edit just wrote it (for example `disable_default_proxy`) | Kernel's own docs and sample skills still show deprecated fields |
-| Before an edit or a shell command | Denies writing a literal Kernel API key into code or a command (a gitignored `.env` is allowed) | A leaked key is expensive to fix |
+| session start, subagent start | in a project that uses kernel, drops a ~1.1k-character primer: delete browsers in `finally`, default control surface, no secrets in code, verify names instead of guessing | the agent can't know the project uses kernel until it opens a file, and subagents don't inherit session context. other projects get nothing. |
+| after an edit | flags a deprecated kernel identifier only when the edit just added it (for example `disable_default_proxy`) | kernel's own docs and sample skills still show deprecated fields |
+| before an edit or a shell command | blocks writing a literal kernel api key into code or a command (a gitignored file is fine) | a leaked key is a pain to clean up |
 
-**MCP server.** The hosted Kernel MCP server (`https://mcp.onkernel.com/mcp`) is bundled for management and quick checks by the coding agent (list and clean up browsers, search the docs, try a snippet). Your product code should call `@onkernel/sdk`, not the MCP.
+**mcp server.** the hosted kernel mcp server (`https://mcp.onkernel.com/mcp`) comes bundled so the coding agent can manage things and do quick checks (list and clean up browsers, search the docs, try a snippet). your product code should call `@onkernel/sdk`, not the mcp.
 
-## Verification status
+## receipts
 
-- **Live probes.** 23 topic probes ran against a real Kernel account on 2026-10-20 (SDK 0.127.0, types re-checked on 0.128.0; CLI 0.49.0). The ledger has <!--ledger-counts-->137 confirmed, 43 refuted, 5 gated and 14 untested<!--/ledger-counts--> rows: refuted means a claim from an earlier skill, the docs or sample code did not hold up, gated means the plan or a missing model key blocked the test. Every row, with its evidence, is in [verified-facts.md](verified-facts.md).
-- **Naive-agent runs.** 24 realistic tasks (screenshots, scraping, logins, vault fill, parallel visits, pools, Apps, debugging a failed session, downloads, uploads, stealth, an audit, a Next.js route, leftover cleanup, one task that needs no browser) were given to agents that knew Kernel only from these files. The final text passed 23 of 23 tasks, and a final re-run of the 13 tasks whose guidance changed passed 13 of 13, with cleanup verified each time. This shows the guidance is enough for an agent that knows nothing else about Kernel. It is not a measurement of how much the plugin changes behavior: there was no control run without the plugin, and a few task prompts state a rule themselves.
-- **Code.** Every TypeScript snippet in the skills type-checks against the installed SDK (`scripts/typecheck-snippets.mjs`); the hook, detection and rule tests pass under `sh`, `dash` and with GNU coreutils first in `PATH`; CI runs both on Ubuntu and macOS.
-- **Not verified**, so the skills mark it "(unverified)" or "(untested)": the interactive OAuth sign-in to the bundled MCP server (the Bearer-key variant is verified), payments (Link, MPP, AgentCard), TOTP and captcha behavior beyond the lab sites, GPU browsers (plan-gated), the Kernel React component's props, and Windows.
+- **live probes.** 23 topic probes ran against a real kernel account on 2026-10-20 (sdk 0.127.0, types re-checked on 0.129.0; cli 0.49.0). the ledger has <!--ledger-counts-->137 confirmed, 43 refuted, 5 gated and 14 untested<!--/ledger-counts--> rows. refuted means a claim from an earlier skill, the docs or sample code didn't hold up; gated means the plan or a missing model key blocked the test. every row and its evidence lives in [verified-facts.md](verified-facts.md).
+- **naive-agent runs.** 24 realistic tasks (screenshots, scraping, logins, vault fill, parallel visits, pools, apps, debugging a failed session, downloads, uploads, stealth, an audit, a next.js route, leftover cleanup, plus one task that needs no browser at all) went to agents that knew kernel only from these files. the final text passed 23 of 23 tasks, and a re-run of the 13 tasks whose guidance changed passed 13 of 13, with cleanup verified every time. that proves the guidance is enough for an agent that knows nothing else about kernel. it doesn't measure how much the plugin changes behavior: there was no control run without the plugin, and a few task prompts state a rule themselves.
+- **code.** every typescript snippet in the skills type-checks against the installed sdk (`scripts/typecheck-snippets.mjs`). the hook, detection and rule tests pass under `sh`, `dash`, with gnu coreutils first in `PATH`, and without `jq`. ci runs all of it on ubuntu and macos.
+- **not verified**, so the skills say "(unverified)" or "(untested)": the interactive oauth sign-in to the bundled mcp server (the bearer-key variant is verified), payments (link, mpp, agentcard), totp and captcha behavior beyond the lab sites, gpu browsers (plan-gated), the kernel react component's props, and windows.
 
-## Privacy and safety
+## privacy and safety
 
-- The plugin ships no secret and asks for none. The hooks make no network calls and send nothing anywhere. Project detection searches manifests, CI files and `.env*` files for Kernel marker names (not values) and keeps a small cache; the stale-identifier check reads the file you just edited; the key guard sees only the text of the tool call.
-- The key guard is a speed bump, not a vault. It checks Edit, Write, NotebookEdit and Bash input for a literal Kernel key (hex digits in either case) and lets you write one into a gitignored file. It does not see a key split over several lines, a key in an MCP tool call or in a subagent prompt.
-- Workflows print session ids and structure, never cookie values, tokens, CDP / live-view / replay URLs or hosted-login URLs.
-- If you already installed Kernel's official `kernel-cli` and `kernel-sdks` plugins, this one supersedes them for TypeScript work. Keeping both can give conflicting advice; this plugin's primer says which to trust.
-- If you also ran `kernel mcp install`, you have two Kernel MCP servers under different names; `/kernel:audit` reports that.
+- the plugin ships no secret and asks for none. the hooks make no network calls and send nothing anywhere. project detection scans manifests, ci files and `.env*` files for kernel marker *names* (never values) and keeps a small private cache; the stale-identifier check reads the file you just edited; the key guard only sees the text of the tool call.
+- the key guard is a speed bump, not a vault. it checks edit, write, notebookedit and bash input for a literal kernel key (hex digits in either case) and lets you write one into a gitignored file. it won't catch a key split across lines, a key inside an mcp tool call, or one in a subagent prompt.
+- workflows print session ids and structure, never cookie values, tokens, cdp / live-view / replay urls or hosted-login urls.
+- already have kernel's official `kernel-cli` and `kernel-sdks` plugins? this one supersedes them for typescript work. running both can give mixed advice; this plugin's primer says which to trust.
+- also ran `kernel mcp install`? then you have two kernel mcp servers under different names, and `/kernel:audit` will tell you.
 
-## Repository layout
+## repo layout
 
 ```
 .claude-plugin/marketplace.json   marketplace "plugin-kernel-sh"
-plugins/kernel/                   the plugin (only this directory is installed)
+plugins/kernel/                   the plugin (only this directory gets installed)
   skills/  hooks/  lib/  rules/  bin/kernel-plugin  .mcp.json
 tests/                            hook, detection and rule tests (sh tests/run.sh)
-lab/                              maintainer smoke tests against the live API
-scripts/                          validate, link check, freshness, secret scan
+lab/                              maintainer smoke tests against the live api
+scripts/                          validate, snippet type-check, link check, freshness, secret scan
 verified-facts.md                 evidence ledger from live runs
-DECISIONS.md                      why it is built this way
+DECISIONS.md                      why it's built this way
+CHANGELOG.md                      what changed per release
 ```
 
-Maintainers: `sh tests/run.sh --all-shells`, `scripts/validate.sh`, `scripts/secret-scan.sh --tree` (the scripts in `scripts/` are bash: run them directly, not through `sh`). After an SDK bump, `cd lab && npm run smoke` (needs a throwaway key). CI runs the tests on Ubuntu and macOS, and a weekly job opens an issue when Kernel ships something that needs re-verifying.
+maintainers: `sh tests/run.sh --all-shells`, `scripts/validate.sh`, `scripts/secret-scan.sh --tree`, and `cd lab && npm install && node ../scripts/typecheck-snippets.mjs`. the scripts in `scripts/` are bash, so run them directly, not through `sh`. after an sdk bump, `cd lab && npm run smoke` (needs a throwaway key). ci runs the tests on ubuntu and macos, and a weekly job opens an issue when kernel ships something that needs re-verifying.
 
-## License
+## license
 
-MIT. Some workflow skills derive from the official Kernel skills (MIT, Copyright (c) 2025 Kernel); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+mit. some workflow skills derive from the official kernel skills (mit, copyright (c) 2025 kernel); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

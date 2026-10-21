@@ -279,6 +279,8 @@ Haiku agents were given a realistic user request (24 tasks: screenshots, scrapin
 | 3 | 23 (final skill text, minus the leftover-cleanup task) | 23 | 23 | 128 |
 | 4 | 13 (tasks whose guidance had just changed, plus the leftover-cleanup task) | 13 | 13 | 84 |
 
+Pool refill (task D08): a size-2 pool at the default `fill_rate_per_minute`, recycled with `reuse: false`, replaced released browsers at about 0.5 per minute; the later jobs of a 4-job run waited 178 s and 238 s to acquire. `references/scale.md` S3 now sizes pools from this.
+
 Round 1 failures: the audit task ran code instead of staying read-only, and both Managed Auth tasks stalled for ten minutes because no stored credential existed (the hosted flow then waits for a person). Both led to changes: the audit skill is read-only by rule, and the login skill now stores a credential first through a script that keeps the password off command lines. All three passed in rounds 3 and 4. After each round the real defects (contradictions between files, snippets that were not copy-paste, wrong facts, missing cleanup, flags that need `--yes`) were fixed and the rest was triaged as environment artifacts of the test harness.
 
 Still open after round 4, by design: the interactive OAuth sign-in to the Kernel MCP server (needs a person), the payment flows, TOTP and captcha-solving beyond what the lab touched, and ambiguity reports about secrets handling for public demo accounts, which the plugin answers with one policy (a password never goes in project code or on a command line; throwaway accounts read it from the environment at run time).

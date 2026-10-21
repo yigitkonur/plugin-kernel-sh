@@ -241,4 +241,4 @@ await kernel.browsers.create({
 
 Gated or untested: residential, mobile and custom proxies, MITM `ca_bundle`, `proxy_routes`, `browsers.update` proxy swap, stealth plus `mode: 'direct'`, ISP countries other than US, WBA, hCaptcha and Turnstile, `proxies.check` with `url`, GPU (plan-gated), `bypass_hosts`.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.129.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

@@ -347,4 +347,4 @@ These are docs-only notes, so each bullet gives the situation, the step and its 
 - Local dev server into the browser: `kernel browsers ssh <id> -R 3000:localhost:3000` (needs `websocat` locally). SSH alone does not count as activity, so create the browser with a long `--timeout` or keep live view open (https://www.kernel.sh/docs/browsers/ssh). Untested.
 - VPN or tunnel in the VM: set `network: { private_hosts: [...] }` at create time; it cannot change later. CIDR rules match literal IPs only, so list private DNS names explicitly (https://www.kernel.sh/docs/browsers/private-networking). Untested.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.129.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

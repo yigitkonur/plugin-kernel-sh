@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.2 - 2026-10-21
+
+- Security: the scripted-login recipes (`logins.md`, `profiles.md`, `site-skill`) put a throwaway password into the `playwright.execute` code string, and Kernel's `control` telemetry stores that string as `api_call.data.code` (SDK type doc; `control` is on by default). The recipes now create the login browser with `telemetry: { browser: { control: { enabled: false } } }`, and the secrets rules in `kernel/SKILL.md` and `observe.md` say why. Whether the opt-out keeps the code out of storage was not read back live.
+- Re-checked on `@onkernel/sdk` 0.129.0 (published 2026-10-21): all 71 snippets and the profile-site analyzer type-check; `locale_source` now reads `default` instead of `metro` (branch on `!== 'override'`), GPU browsers default to a 60 Hz refresh rate, and Kernel wallets carry a secret `capture_token`. The lab and analyzer pins move to 0.129.0.
+- `scale.md`: pool sizing guidance rewritten from one long paragraph into three steps; latency numbers now match the ledger.
+- The weekly freshness job no longer opens a second issue for a Kernel state it already reported, and its issue title includes the docs changelog entry.
+- README: rewritten in a casual lowercase style; adds a one-command install (`claude plugin install kernel --marketplace yigitkonur/plugin-kernel-sh`), team (project-scope), update and uninstall commands, all run from a clean Claude Code config.
+
 ## 1.0.1 - 2026-10-21
 
 A quality pass on 1.0.0: wrong or unsafe advice fixed, claims aligned with the evidence, and the hooks tightened. Facts re-checked against `@onkernel/sdk` 0.128.0 and CLI 0.49.0 (both still the latest on npm).

@@ -60,7 +60,7 @@ Read `status` first. If it is not `ok`, skip this step and put `lookup failed <s
 
 ## 3. Prepare the analyzer before creating browsers
 
-The analyzer is Kernel's official script (see `scripts/NOTICE.md`), with `package.json` pinned to `@onkernel/sdk` 0.128.0 and a lockfile. If dependencies are already installed in this skill's `scripts` folder (`node_modules` present), you may run the analyzer from there instead of copying and running `npm ci`; set `W` to a fresh `mktemp -d` anyway for logs and output, and `cd` into the skill's `scripts` for step 5. Otherwise find this skill's directory (the "Base directory for this skill" path shown when the skill loaded), then run now, replacing `<SKILL_DIR>` and `<URL>`:
+The analyzer is Kernel's official script (see `scripts/NOTICE.md`), with `package.json` pinned to `@onkernel/sdk` 0.129.0 and a lockfile. If dependencies are already installed in this skill's `scripts` folder (`node_modules` present), you may run the analyzer from there instead of copying and running `npm ci`; set `W` to a fresh `mktemp -d` anyway for logs and output, and `cd` into the skill's `scripts` for step 5. Otherwise find this skill's directory (the "Base directory for this skill" path shown when the skill loaded), then run now, replacing `<SKILL_DIR>` and `<URL>`:
 
 ```bash
 W=$(mktemp -d /tmp/profile-site.XXXXXX)
@@ -208,5 +208,5 @@ Evidence kept at: <$W/output path> (contains cookie names, header names, non-sen
 Not verified: <list anything skipped or failed>
 ```
 
-> Checked 2026-10-20 against @onkernel/sdk 0.128.0 and kernel CLI 0.49.0.
+> Checked 2026-10-20 against @onkernel/sdk 0.128.0 and kernel CLI 0.49.0; types re-checked on 0.129.0.
 > Run live: the analyzer, `--stealth` with `--proxy-mode direct` (ledger W5), and the registry `lookup` through raw HTTP (curl); the SDK form in step 2 is the same call and was not run as written. Details: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

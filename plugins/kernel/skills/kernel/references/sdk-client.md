@@ -6,7 +6,7 @@ Read this when you write `new Kernel(...)`, see a 401/404/429/5xx from the SDK, 
 
 **If** you are writing shipped code -> **Do** `import Kernel from '@onkernel/sdk'; const kernel = new Kernel();`. It reads `KERNEL_API_KEY` and throws at construction if it is missing or empty. -> **Avoid** `apiKey: '...'` literals, keys in code, prompts, logs, CLI args or frontend bundles. -> **Source** https://www.kernel.sh/docs/start/quickstart, SDK `src/client.ts`.
 
-Options worth knowing (installed SDK 0.128.0):
+Options worth knowing (installed SDK 0.129.0):
 
 | Option | Default | Use it when |
 |---|---|---|
@@ -21,7 +21,7 @@ Options worth knowing (installed SDK 0.128.0):
 
 **Avoid** passing both `environment` and `baseURL` (or setting `KERNEL_BASE_URL` while passing `environment`): the constructor throws "Ambiguous URL". Pass `baseURL: null` with `environment` if you must.
 
-Env vars the SDK reads (grep of installed 0.128.0): `KERNEL_API_KEY`, `KERNEL_BASE_URL`, `KERNEL_LOG`, `KERNEL_CUSTOM_HEADERS`, `KERNEL_SUPPRESS_BUN_WARNING`, `KERNEL_BROWSER_ROUTING_SUBRESOURCES`. It does NOT read `KERNEL_PROJECT` (only the CLI does).
+Env vars the SDK reads (grep of installed 0.129.0): `KERNEL_API_KEY`, `KERNEL_BASE_URL`, `KERNEL_LOG`, `KERNEL_CUSTOM_HEADERS`, `KERNEL_SUPPRESS_BUN_WARNING`, `KERNEL_BROWSER_ROUTING_SUBRESOURCES`. It does NOT read `KERNEL_PROJECT` (only the CLI does).
 
 **Runtime**: Node 20+ (non-EOL); Stagehand 4.x needs Node >= 22.18; Bun 1.0+ works but logs a warning about Playwright CDP issues, silenced with `KERNEL_SUPPRESS_BUN_WARNING=true`. The SDK needs a global `fetch`. **Source** SDK README "Requirements", `src/client.ts`.
 
@@ -127,4 +127,4 @@ for await (const _browser of client.browsers.list()) visible++;
 - **Avoid** `kernel.browsers.delete` (undefined); use `deleteByID`. Full "does not exist" list: `references/does-not-exist.md`.
 - Audit logs: CLI has `search`, `download`, `export`, no `list`; Hobbyist is gated.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.129.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

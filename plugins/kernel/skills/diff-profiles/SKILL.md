@@ -200,4 +200,4 @@ Workspace: removed | kept at <path>
 Never include values, only names, counts and lengths.
 
 ---
-Verified 2026-10-20 against SDK 0.128.0 / CLI 0.49.0; evidence ledger https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md; see also ../kernel/references/profiles.md.
+Verified live 2026-10-20; types re-checked on SDK 0.129.0 / CLI 0.49.0; evidence ledger https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md; see also ../kernel/references/profiles.md.

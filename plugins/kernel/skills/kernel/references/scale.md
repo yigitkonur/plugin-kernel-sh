@@ -12,7 +12,7 @@ Three separate limits, easy to confuse (https://www.kernel.sh/docs/browsers/conc
 
 ## S1. Default: on-demand
 
-**If** you are building, scaling, or config differs per user or task -> **Do** `kernel.browsers.create` per task, `deleteByID` in `finally`. Put a queue in front when volume exceeds your concurrency. -> **Avoid** a pool "just in case"; caching browsers for speed (a create took 315-747 ms, n=3, API call only). -> **Source** https://www.kernel.sh/docs/introduction/scale.
+**If** you are building, scaling, or config differs per user or task -> **Do** `kernel.browsers.create` per task, `deleteByID` in `finally`. Put a queue in front when volume exceeds your concurrency. -> **Avoid** a pool "just in case"; caching browsers for speed (a client-side create took about 333 ms p50 and 836 ms at most, n=5, ledger P01.7). -> **Source** https://www.kernel.sh/docs/introduction/scale.
 
 ## S2. When a pool is worth it
 
@@ -29,7 +29,9 @@ Three separate limits, easy to confuse (https://www.kernel.sh/docs/browsers/conc
 
 **If** you chose a pool -> **Do**:
 1. Create it once at deploy or startup. `size` is required (omitting it is a 400 "size must be at least 1").
-2. Wait for fill before sending traffic: poll `retrieve(...).available_count` with a deadline (loop below). Fill time grows with size: a size-1 pool took 6 s, a size-2 pool about 55 s to reach `available_count=2` (12 polls at 5 s), so use a generous deadline (the loop below allows 240 s). Warm-up varied between runs (about 10 s and about 60 s for the same size): poll up to the deadline in the snippet, do not hardcode a wait. Other timings: refills after `reuse: false` took about 4 s on a size-1 pool, but a size-2 pool at the default `fill_rate_per_minute` (a percentage of the pool per minute; the cap is 25 for most organizations) replaced released browsers at about 0.5 per minute, and acquires for the later jobs of a 4-job run waited 178 s and 238 s; after `flush` 44 s; after `update({ discard_all_idle: true })` 58 s. So a small pool recycled with `reuse: false` is slow to serve more jobs than its size: size it at or above the number of concurrent jobs, keep the acquire deadline above the refill time, and do not use a pool for a short script that runs a handful of jobs (create a browser per task instead, about 330 ms each). Docs say a pool "takes a few minutes to fill" at size. Never create a pool inside a request.
+2. Wait for fill before sending traffic: poll `retrieve(...).available_count` up to a deadline (loop below, 240 s); never hard-code a wait. Fill time varies and grows with size (seen live: size 1 in 6 to 10 s, size 2 in about 55 to 60 s; the docs say "a few minutes" at size). Never create a pool inside a request.
+   - Refill is slow for small pools. `fill_rate_per_minute` is a percentage of the pool per minute (cap 25 for most organizations), so a size-2 pool recycled with `reuse: false` replaced browsers at about 0.5 per minute and the later jobs of a 4-job run waited 178 s and 238 s to acquire (dogfood task D08). A size-1 refill took about 4 s; a `flush` rebuild 44 s; `update({ discard_all_idle: true })` 58 s.
+   - So size the pool at or above the number of concurrent jobs, keep the acquire deadline above the refill time, and for a short script with a handful of jobs create a browser per task instead (about 330 ms each, ledger P01.7).
 3. `acquire` with `acquire_timeout_seconds`; null-check the result.
 4. `release` in `finally`.
 
@@ -315,4 +317,4 @@ Pool create params, from the installed types: `size` (required), `name`, `fill_r
 
 ---
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.129.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md

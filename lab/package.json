@@ -8,7 +8,7 @@
     "typecheck-snippets": "node ../scripts/typecheck-snippets.mjs"
   },
   "dependencies": {
-    "@onkernel/sdk": "0.128.0"
+    "@onkernel/sdk": "0.129.0"
   },
   "devDependencies": {
     "@types/node": "latest",

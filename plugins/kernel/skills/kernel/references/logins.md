@@ -82,8 +82,8 @@ CLI equivalents exist for every step: `kernel auth connections create|get|update
 ## Scripted login once, reuse the profile
 
 **If** a dev script of yours logs in with a password itself (no Managed Auth), for a throwaway or demo account the user handed you, and later runs should reuse the session. Throwaway/demo accounts only: for a real account use Managed Auth with a stored credential, or vault fill.
-**Do** read the password from the environment at run time and put it into the `playwright.execute` code string with `JSON.stringify` (`execute` takes only `code`, `executor` and `timeout_sec`, so it travels in the request body); never log that string and never commit it. Log in only when the protected page redirects to login; open the browser with `save_changes: true` as the profile's one writer; `deleteByID` in `finally`.
-**Avoid** a hard-coded password; `KERNEL_LOG=debug` or `logLevel: 'debug'` (logs the body, password included); a command-line argument or an inline `SECRET=... node` prefix (shell history); a second writer on the same profile. A password pasted in chat is already in the transcript: keep it out of files, shell history and later commands.
+**Do** read the password from the environment at run time and put it into the `playwright.execute` code string with `JSON.stringify` (`execute` takes only `code`, `executor` and `timeout_sec`, so it travels in the request body); never log that string and never commit it. Kernel's `control` telemetry stores the submitted code as `api_call.data.code` (SDK type doc; `control` is on by default), so create the login browser with `telemetry: { browser: { control: { enabled: false } } }` (the SDK's documented opt-out; whether that keeps the code out of storage was not read back live). Log in only when the protected page redirects to login; open the browser with `save_changes: true` as the profile's one writer; `deleteByID` in `finally`.
+**Avoid** a hard-coded password; `control` telemetry left on for the login browser (it stores the code, password included); `KERNEL_LOG=debug` or `logLevel: 'debug'` (logs the body, password included); a command-line argument or an inline `SECRET=... node` prefix (shell history); a second writer on the same profile. A password pasted in chat is already in the transcript: keep it out of files, shell history and later commands.
 **Source** verified live (ran twice: login performed, then `wasLoggedIn: true`); `references/profiles.md`.
 
 ```ts
@@ -110,7 +110,10 @@ return { wasLoggedIn, path: new URL(page.url()).pathname };
 await kernel.profiles.create({ name: PROFILE }, { maxRetries: 0, timeout: 30_000 })
   .catch((e) => { if (!(e instanceof ConflictError)) throw e; });
 const browser = await kernel.browsers.create(
-  { headless: true, timeout_seconds: 300, profile: { name: PROFILE, save_changes: true }, tags: { run: process.env.RUN_ID ?? 'local' } },
+  {
+    headless: true, timeout_seconds: 300, profile: { name: PROFILE, save_changes: true }, tags: { run: process.env.RUN_ID ?? 'local' },
+    telemetry: { browser: { control: { enabled: false } } }, // control telemetry would store the code below, password included
+  },
   { maxRetries: 0, timeout: 30_000 });
 try {
   const res = await kernel.browsers.playwright.execute(
@@ -150,7 +153,7 @@ Untested pattern: `await kernel.auth.connections.login(id)`, then `for await (co
 **If** the user must sign in inside your own app instead of on Kernel's hosted page.
 **Do** keep the API key on the server: a backend route creates or reuses the connection, calls `login`, and returns only the connection `id` and the one-time `handoff_code`. The page is a `'use client'` component with `<KernelManagedAuth sessionId handoffCode onSuccess onError />` (`sessionId` is the connection id) and the package stylesheet.
 **Avoid** the API key in the frontend; returning `hosted_url` or `live_view_url` (the `login` response carries both and both are credentials); reusing a `handoff_code` (single-use, so every reconnect needs a fresh `login`); taking `success_url` or `error_url` from client input; a `profile_name` shared across end users or derived from the domain (one profile per end user, never per domain); auto-retries on `connections.create` and `login`.
-**Source** https://www.kernel.sh/docs/auth/react; the route type-checks against @onkernel/sdk 0.128.0 (strict `tsc`; not run against Kernel); the component and its props, callbacks and stylesheet path are (unverified): the package was not installed.
+**Source** https://www.kernel.sh/docs/auth/react; the route type-checks against @onkernel/sdk 0.129.0 (strict `tsc`; not run against Kernel); the component and its props, callbacks and stylesheet path are (unverified): the package was not installed.
 
 `profile_name` must be per end user (`user-<id>` from your session, never from the request body, never per domain), or every app user shares one logged-in session. `connections.create` and `login` are side-effecting: pass `{ maxRetries: 0 }` and handle 409 (see "409 on create"; `connectionFor` below is defined there). `handoff_code` is optional in the SDK type (`handoff_code?`): return 502 when it is missing. A `domain` from the client is untrusted: validate it, and prefer an allow-list of the sites your app supports.
 
@@ -342,4 +345,4 @@ The same `ConflictError` catch on `profiles.create` also ran live.
 **Avoid** deleting a connection or profile that a real user still needs.
 **Source** verified live. Check with `kernel auth connections list --domain <d> --profile-name <p> -o json`, `kernel credentials list --query <name> -o json`, `kernel profiles list --name <p> -o json` (all `[]`). `kernel vaults get <name>` on a deleted vault prints plain `ERROR: Not_found`.
 
-Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.128.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
+Verified live 2026-10-20 (Hobbyist plan); types re-checked on @onkernel/sdk 0.129.0. Evidence ledger: https://github.com/yigitkonur/plugin-kernel-sh/blob/main/verified-facts.md
