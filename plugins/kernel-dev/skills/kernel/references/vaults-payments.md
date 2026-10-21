@@ -28,7 +28,7 @@ Vault fill was verified live. **Payments were never run** (real money, real wall
 ```ts
 // untested as written: adapted from a live run (names changed, trimmed). `username` and `password` are never literals in code:
 // read them from the environment at run time (a throwaway account the user handed you; see references/logins.md and the
-// /kernel:login skill), or omit `value` and let the user type them into the collection form (`action.url`, step 2).
+// /kernel-dev:login skill), or omit `value` and let the user type them into the collection form (`action.url`, step 2).
 const vault = await kernel.vaults.upsert({ name: 'user-12345' });
 await kernel.vaults.items.upsert('portal-login', {
   id_or_name: vault.id,

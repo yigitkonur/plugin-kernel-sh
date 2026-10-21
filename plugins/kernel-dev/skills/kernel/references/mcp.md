@@ -10,10 +10,10 @@ The hosted MCP server is for you, the coding agent, to look at and poke at a Ker
 
 **If** the plugin is installed -> **Do** nothing: it bundles this config; the user runs `/mcp` once to authorize. **If** the user wants it in another client -> **Do** `kernel mcp install --target <target>` (targets: `cursor`, `claude`, `claude-code`, `antigravity`, `windsurf`, `vscode`, `goose`, `zed`, `fx`). `--target claude-code` writes the server to `~/.claude.json`, and the plugin's bundled `.mcp.json` matches that config (write location from the plan, not the docs). -> **Avoid** installing it twice: if the user already ran `kernel mcp install --target claude-code`, you probably have two Kernel servers under different tool prefixes (inferred from the prefix naming, not tested). -> **Source** https://www.kernel.sh/docs/reference/cli/mcp
 
-The bundled config is `plugins/kernel/.mcp.json` (an `http` server at the endpoint below).
+The bundled config is `plugins/kernel-dev/.mcp.json` (an `http` server at the endpoint below).
 
 - Endpoint is `https://mcp.onkernel.com/mcp` (streamable HTTP). For clients without remote MCP: `npx -y mcp-remote https://mcp.onkernel.com/mcp` (stdio). -> https://www.kernel.sh/docs/reference/mcp-server/transports
-- Tool names inside Claude Code through this plugin: `mcp__plugin_kernel_kernel__<tool>`.
+- Tool names inside Claude Code through this plugin: `mcp__plugin_kernel-dev_kernel__<tool>`.
 
 ## M3. Auth
 

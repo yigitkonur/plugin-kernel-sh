@@ -195,9 +195,9 @@ CLI: `kernel profiles download <name> --to <dir>` extracts into `<dir>` (`--form
 ## "Works on profile A, not on B"
 
 **If** the same login works in one profile and fails in another
-**Do** run `/kernel:diff-profiles <a> <b>`. By hand: download both with `kernel profiles download --to`, compare cookie names and domains, storage keys and preference keys, never values.
+**Do** run `/kernel-dev:diff-profiles <a> <b>`. By hand: download both with `kernel profiles download --to`, compare cookie names and domains, storage keys and preference keys, never values.
 **Avoid** printing cookie values into the chat or logs.
-**Source** `/kernel:diff-profiles` workflow
+**Source** `/kernel-dev:diff-profiles` workflow
 
 ## Profiles and logins
 

@@ -1,5 +1,5 @@
 [kernel plugin] This project uses Kernel (kernel.sh) cloud browsers — detected: {detected}.
-Before writing or changing Kernel code, load the skill `kernel:kernel` (TypeScript SDK + kernel CLI + Kernel MCP). Rules that prevent the most damage:
+Before writing or changing Kernel code, load the skill `kernel-dev:kernel` (TypeScript SDK + kernel CLI + Kernel MCP). Rules that prevent the most damage:
 1) deleteByID every browser you create, in finally. browser.close() only disconnects: the browser keeps its concurrency slot until deleted or its timeout ends, bills while any client is connected, and GPU browsers never go idle.
 2) Drive pages with kernel.browsers.playwright.execute by default; computer controls as fallback; connectOverCDP only for existing Playwright/Puppeteer code.
 3) Never put KERNEL_API_KEY, passwords, or CDP/live-view/replay/hosted-login URLs in code, prompts, logs or CLI args.

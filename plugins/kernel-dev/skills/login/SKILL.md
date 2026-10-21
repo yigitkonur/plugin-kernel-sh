@@ -6,7 +6,7 @@ argument-hint: "<domain>"
 ---
 <!-- Derived in part from the official Kernel skill `kernel-auth` (https://github.com/kernel/skills, MIT, Copyright (c) 2025 Kernel). License text: THIRD_PARTY_NOTICES.md at the plugin root. -->
 
-# /kernel:login
+# /kernel-dev:login
 
 Goal: leave the user with a Kernel browser already signed in to one site, a profile name and connection id they can reuse, and no secret in the transcript.
 

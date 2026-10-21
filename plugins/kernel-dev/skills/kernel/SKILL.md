@@ -34,7 +34,7 @@ const browser = await kernel.browsers.create(
   { maxRetries: 0, timeout: 30_000 }, // a retried create can duplicate: see sdk-client.md
 );
 try {
-  console.error('kernel session', browser.session_id); // keep the id (not the URLs): it is what /kernel:debug-session needs after the browser is gone
+  console.error('kernel session', browser.session_id); // keep the id (not the URLs): it is what /kernel-dev:debug-session needs after the browser is gone
   const res = await kernel.browsers.playwright.execute(
     browser.session_id,
     { code: "await page.goto('https://example.com'); return await page.title();", timeout_sec: 30 },
@@ -84,7 +84,7 @@ Kernel releases every one to three days, so names and limits in memory go stale.
 | `references/browsers.md` | Creating browsers: lifecycle, timeouts, standby, memory, viewport, regions, GPU |
 | `references/control.md` | Scraping, extracting data or taking screenshots; driving the browser: Playwright execute, computer controls, CDP, REPL, WebMCP, files, processes, HTTP through the browser |
 | `references/unblock.md` | A site blocks, challenges or throttles you: stealth, proxies, captcha, config registry |
-| `references/logins.md` | The task needs a logged-in session: Managed Auth (hosted, React embed, programmatic), stored credentials (the /kernel:login skill ships a script that keeps passwords off command lines), vault fill, 1Password, MFA; also the scripted-login-plus-profile-reuse recipe for throwaway accounts |
+| `references/logins.md` | The task needs a logged-in session: Managed Auth (hosted, React embed, programmatic), stored credentials (the /kernel-dev:login skill ships a script that keeps passwords off command lines), vault fill, 1Password, MFA; also the scripted-login-plus-profile-reuse recipe for throwaway accounts |
 | `references/profiles.md` | State must survive between browsers: saving, loading, who may write |
 | `references/vaults-payments.md` | Credentials or cards must reach a page without the model seeing them |
 | `references/scale.md` | Many browsers or bursts: concurrency, pools, queueing |
@@ -100,12 +100,12 @@ Kernel releases every one to three days, so names and limits in memory go stale.
 
 ## Workflows
 
-- `/kernel:debug-session <session-id>`: why did a run fail? (works after the browser was deleted)
-- `/kernel:login <domain>`: get a logged-in browser for a site
-- `/kernel:audit [path]`: review this project's Kernel usage
-- `/kernel:profile-site <url>`: find out what bot detection a site uses and what Kernel config beats it
-- `/kernel:diff-profiles <a> <b>`: why does a login work in one profile and not another
-- `/kernel:site-skill`: turn a workflow that worked into a reusable skill for that site
+- `/kernel-dev:debug-session <session-id>`: why did a run fail? (works after the browser was deleted)
+- `/kernel-dev:login <domain>`: get a logged-in browser for a site
+- `/kernel-dev:audit [path]`: review this project's Kernel usage
+- `/kernel-dev:profile-site <url>`: find out what bot detection a site uses and what Kernel config beats it
+- `/kernel-dev:diff-profiles <a> <b>`: why does a login work in one profile and not another
+- `/kernel-dev:site-skill`: turn a workflow that worked into a reusable skill for that site
 
 ## What this plugin cannot tell you
 

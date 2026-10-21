@@ -75,7 +75,7 @@ console.log(result.analysis?.status, result.recommendation?.type, Boolean(result
 
 ## 4. Fair test of stealth vs normal
 
-**If** you compare stealth against non-stealth (or `/kernel:profile-site`) -> **Do** control the network: either run both on the same explicit proxy (`proxy: { id }` on both), or run both direct (`stealth: true` plus `proxy: { mode: 'direct' }` against `{}`), and say which design you used. **Avoid** comparing stealth-with-ISP-proxy against plain-direct and crediting stealth: a live test showed those two differ in egress IP as well as in stealth. **Source** verified live; `kernel-cli` profile-website-bot-detection skill.
+**If** you compare stealth against non-stealth (or `/kernel-dev:profile-site`) -> **Do** control the network: either run both on the same explicit proxy (`proxy: { id }` on both), or run both direct (`stealth: true` plus `proxy: { mode: 'direct' }` against `{}`), and say which design you used. **Avoid** comparing stealth-with-ISP-proxy against plain-direct and crediting stealth: a live test showed those two differ in egress IP as well as in stealth. **Source** verified live; `kernel-cli` profile-website-bot-detection skill.
 
 ```ts
 // stealth with direct egress (solver kept, per SDK types) -- untested live (unverified: stealth + direct was not run)

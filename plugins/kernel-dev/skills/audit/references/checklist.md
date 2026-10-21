@@ -1,6 +1,6 @@
 # Audit checklist: judgments a regex cannot make
 
-Used by `/kernel:audit`. One row per judgment. Each is: **If** you see this -> **Look for** the evidence -> **Fix** -> **Source**. Report a row only with a `file:line`. Single-regex rules (deprecated names, key literals, logged URLs) come from `kernel-plugin lint` (`rules/stale-api.tsv`); this file covers what the linter misses and how to judge its hits.
+Used by `/kernel-dev:audit`. One row per judgment. Each is: **If** you see this -> **Look for** the evidence -> **Fix** -> **Source**. Report a row only with a `file:line`. Single-regex rules (deprecated names, key literals, logged URLs) come from `kernel-plugin lint` (`rules/stale-api.tsv`); this file covers what the linter misses and how to judge its hits.
 
 Rows written against @onkernel/sdk 0.128.0 and re-checked on 0.129.0. A project pinned to an older SDK (for example `^0.96.0`) may differ in field names and defaults: report that as an uncertainty, not a finding.
 
@@ -114,7 +114,7 @@ await release(lease.session_id, false);
 
 ## C14. Duplicate Kernel MCP servers
 
-**If** `claude mcp list` shows two servers that point at `https://mcp.onkernel.com/mcp`: the one this plugin bundles (`plugins/kernel/.mcp.json`) and one added by `kernel mcp install --target claude-code`. **Look for** it in the environment step, not in code. **Fix** keep one; remove the other with `claude mcp remove <name>` (tell the user, do not run it). **Avoid** two tool sets under different prefixes: the model sees duplicate tools. (That two servers appear is inferred from the prefix naming, unverified.) **Source** https://www.kernel.sh/docs/reference/cli/mcp; `../../kernel/references/mcp.md`.
+**If** `claude mcp list` shows two servers that point at `https://mcp.onkernel.com/mcp`: the one this plugin bundles (`plugins/kernel-dev/.mcp.json`) and one added by `kernel mcp install --target claude-code`. **Look for** it in the environment step, not in code. **Fix** keep one; remove the other with `claude mcp remove <name>` (tell the user, do not run it). **Avoid** two tool sets under different prefixes: the model sees duplicate tools. (That two servers appear is inferred from the prefix naming, unverified.) **Source** https://www.kernel.sh/docs/reference/cli/mcp; `../../kernel/references/mcp.md`.
 
 ## C15. `.env` tracked by git
 

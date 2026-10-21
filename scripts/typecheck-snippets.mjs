@@ -22,12 +22,15 @@ const fileArgs = args.filter((a) => !a.startsWith('--'));
 function walk(dir, out = []) {
   for (const n of readdirSync(dir)) {
     const p = join(dir, n);
-    if (statSync(p).isDirectory()) walk(p, out);
+    if (statSync(p).isDirectory()) { if (n !== 'node_modules') walk(p, out); }
     else if (n.endsWith('.md')) out.push(p);
   }
   return out;
 }
-const files = fileArgs.length ? fileArgs.map((f) => resolve(f)) : walk(join(repo, 'plugins/kernel/skills'));
+const files = fileArgs.length ? fileArgs.map((f) => resolve(f)) : readdirSync(join(repo, 'plugins')).flatMap((p) => {
+  const d = join(repo, 'plugins', p, 'skills');
+  try { return statSync(d).isDirectory() ? walk(d) : []; } catch { return []; }
+});
 
 const map = new Map(); // generated file -> { md, line }
 let n = 0;

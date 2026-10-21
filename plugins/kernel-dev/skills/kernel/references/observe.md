@@ -63,7 +63,7 @@ Facts that change what you do:
 
 ## O2. Debug ladder (after the browser is gone)
 
-**If** a run failed and you have a session id. **Do** go in this order; `/kernel:debug-session <id>` runs this ladder for you.
+**If** a run failed and you have a session id. **Do** go in this order; `/kernel-dev:debug-session <id>` runs this ladder for you.
 
 1. The record: `kernel browsers get <id> --include-deleted -o json`. SDK: `kernel.browsers.retrieve(id, { include_deleted: true })`. Without the flag both return 404. A deleted record has `deleted_at` and no `status`.
 2. Filtered events, never the whole log:

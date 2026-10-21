@@ -9,7 +9,7 @@ Conventions that apply everywhere:
 - Most `{id_or_name}` routes take either; pool release needs the browser id.
 - Offset-paged lists (`apps`, `deployments`, `invocations`, `projects`, `api-keys`, telemetry destinations, browsers, profiles) return a bare array over raw HTTP with `X-Has-More` and `X-Next-Offset` headers; the SDK wraps them in an async-iterable page (`for await`). Audit logs use `page_token` and `X-Next-Page-Token` instead.
 - CLI: add `-o json` per command for raw API output. `kernel browsers delete` never prompts and has no `-y`; other destructive commands take `-y`.
-- MCP tools are `mcp__plugin_kernel_kernel__<tool>` when installed through this plugin. The tool schemas mark `context` required, so pass it; the server also accepted calls without it (ledger P21.5, see `references/mcp.md`).
+- MCP tools are `mcp__plugin_kernel-dev_kernel__<tool>` when installed through this plugin. The tool schemas mark `context` required, so pass it; the server also accepted calls without it (ledger P21.5, see `references/mcp.md`).
 
 ## Client (`new Kernel(options)`)
 

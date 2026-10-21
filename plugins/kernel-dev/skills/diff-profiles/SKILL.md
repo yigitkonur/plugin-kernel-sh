@@ -11,7 +11,7 @@ disable-model-invocation: true
 
 Compare what two profiles actually contain, find the state that explains "works on A, fails on B", and report it without printing any value. The argument is the text after the skill name in the user's message (or the line starting ARGUMENTS:): `<profile-a> <profile-b> [issue]`. Profile A is the working baseline, B the broken one. If either profile is missing, ask for it. If the issue is missing, do not ask: default to Cookies, Session Storage, Local Storage and Preferences and proceed.
 
-This skill is user-invoked (`/kernel:diff-profiles <a> <b>`; the model cannot start it). The agent may suggest it when a login works in one profile and not another, then follow these steps by hand if the user asks.
+This skill is user-invoked (`/kernel-dev:diff-profiles <a> <b>`; the model cannot start it). The agent may suggest it when a login works in one profile and not another, then follow these steps by hand if the user asks.
 
 ## Rules
 

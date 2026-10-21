@@ -6,22 +6,25 @@
 #  4 every references/ or scripts/ path named in a SKILL.md, and every ${CLAUDE_PLUGIN_ROOT}/ path named in
 #    hooks.json, SKILL.md or README, exists  (a line containing "novalidate" is skipped)
 #  5 size limits: SKILL.md <= 300 lines, references <= 350 lines, description <= 600 chars
-#  6 VERSION == plugin.json == marketplace.json (metadata and plugin entry)
-#  7 THIRD_PARTY_NOTICES.md ships inside the plugin and matches the root copy; 8 no $N / $ARGUMENTS in SKILL.md bodies
-#  9 the ledger counts quoted in README.md match verified-facts.md
+#  6 each plugin's plugin.json version == its marketplace entry version (plugin.json is the source of truth)
+#  7 THIRD_PARTY_NOTICES.md ships inside every plugin and matches the root copy; 8 no $N / $ARGUMENTS in SKILL.md bodies
+#  9 the ledger counts quoted in README.md match verified-facts.md; 10 shared hook libs are in sync
 set -u; shopt -s nullglob
 cd "$(git rev-parse --show-toplevel)" || exit 2
-P=plugins/kernel; fail=0
+fail=0
 bad() { echo "validate: $*" >&2; fail=1; }
+PLUGINS="$(jq -r '.plugins[].source' .claude-plugin/marketplace.json | sed 's#^\./##')"
+[ -n "$PLUGINS" ] || bad "marketplace.json lists no plugins"
 
 # 1
 if command -v claude >/dev/null 2>&1; then
-  for t in . "$P" "$P/skills"; do claude plugin validate "$t" --strict >/dev/null 2>&1 || { bad "claude plugin validate --strict failed on $t"; claude plugin validate "$t" --strict 2>&1 | sed 's/^/  /' >&2; }; done
+  for t in . $(for P in $PLUGINS; do printf '%s %s ' "$P" "$P/skills"; done); do claude plugin validate "$t" --strict >/dev/null 2>&1 || { bad "claude plugin validate --strict failed on $t"; claude plugin validate "$t" --strict 2>&1 | sed 's/^/  /' >&2; }; done
 else echo "validate: claude not installed, skipping claude plugin validate" >&2; fi
 
 # 2
 while IFS= read -r f; do jq -e . "$f" >/dev/null 2>&1 || bad "invalid JSON: $f"; done < <(git ls-files -co --exclude-standard '*.json')
 
+for P in $PLUGINS; do
 # 3
 for f in "$P"/skills/*/SKILL.md; do
   fm="$(awk 'NR==1&&$0!="---"{exit} NR>1&&$0=="---"{exit} NR>1{print}' "$f")"
@@ -52,7 +55,7 @@ for f in "$P"/skills/*/SKILL.md "$P"/skills/*/references/*.md; do
   d="$(dirname "$f")"
   while IFS= read -r p; do
     [ -e "$d/$p" ] || bad "$f names missing path: $p"
-  done < <(grep -v 'novalidate' "$f" | grep -oE '(\.\./)+kernel/references/[A-Za-z0-9._-]+\.md' | sort -u)
+  done < <(grep -v 'novalidate' "$f" | grep -oE '(\.\./)+[a-z-]+/references/[A-Za-z0-9._-]+\.md' | sort -u)
 done
 for f in "$P"/skills/*/references/*.md; do check_paths "$f" "$(dirname "$(dirname "$f")")"; done
 for f in "$P/hooks/hooks.json" "$P"/skills/*/SKILL.md "$P"/skills/*/references/*.md README.md "$P/README.md"; do
@@ -63,10 +66,9 @@ for f in "$P/hooks/hooks.json" "$P"/skills/*/SKILL.md "$P"/skills/*/references/*
 done
 
 # 6
-V="$(tr -d '[:space:]' < VERSION)"
-[ "$(jq -r .version "$P/.claude-plugin/plugin.json")" = "$V" ] || bad "plugin.json version != VERSION ($V)"
-[ "$(jq -r '.metadata.version' .claude-plugin/marketplace.json)" = "$V" ] || bad "marketplace metadata.version != VERSION ($V)"
-[ "$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)" = "$V" ] || bad "marketplace plugin entry version != VERSION ($V)"
+V="$(jq -r .version "$P/.claude-plugin/plugin.json")"
+[ "$(jq -r --arg s "./$P" '.plugins[] | select(.source == $s) | .version' .claude-plugin/marketplace.json)" = "$V" ] || bad "marketplace entry version for $P != plugin.json ($V)"
+[ "$(jq -r --arg s "./$P" '.plugins[] | select(.source == $s) | .name' .claude-plugin/marketplace.json)" = "$(jq -r .name "$P/.claude-plugin/plugin.json")" ] || bad "marketplace entry name for $P != plugin.json name"
 
 # 7 the license notice ships inside the plugin and the repo-root copy matches it
 [ -f "$P/THIRD_PARTY_NOTICES.md" ] || bad "missing $P/THIRD_PARTY_NOTICES.md (the installed plugin must carry the upstream MIT notice)"
@@ -76,6 +78,10 @@ cmp -s THIRD_PARTY_NOTICES.md "$P/THIRD_PARTY_NOTICES.md" || bad "THIRD_PARTY_NO
 if grep -n -E '\$([0-9]|ARGUMENTS)' "$P"/skills/*/SKILL.md >/dev/null 2>&1; then
   bad "a SKILL.md contains \$N or \$ARGUMENTS, which Claude Code rewrites: $(grep -n -E '\$([0-9]|ARGUMENTS)' "$P"/skills/*/SKILL.md | head -3 | cut -c1-120)"
 fi
+done
+
+# 10 hook libraries shared between plugins stay identical to shared/lib (scripts/sync-shared.sh copies them)
+for f in shared/lib/*; do for P in $PLUGINS; do [ -f "$P/lib/${f##*/}" ] || continue; cmp -s "$f" "$P/lib/${f##*/}" || bad "$P/lib/${f##*/} differs from $f (run scripts/sync-shared.sh)"; done; done
 
 # 9 the ledger counts quoted in the README match verified-facts.md (probe rows P*, R*, MC*)
 counts="$(awk -F'|' 'NF >= 5 && $2 ~ /^ *(P[0-9]|R[0-9]|MC[0-9])/ { v = $4; gsub(/ /, "", v); c[v]++ } END { printf "%d confirmed, %d refuted, %d gated and %d untested", c["confirmed"], c["refuted"], c["gated"], c["untested"] }' verified-facts.md)"
