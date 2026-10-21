@@ -14,18 +14,20 @@ main() {
   [ -n "$KP_JSON" ] || return 0
   [ -n "$(kb_key)" ] || return 0
   sd="$(kp_state_dir "$(json_get session_id)")"
-  f="$(kb_track_file "$sd")"; [ -s "$f" ] || return 0
+  live="$(kb_track_live "$sd")"; [ -n "$live" ] || return 0
+  printf '%s\n' "$live" | {
   while IFS="$KP_TAB" read -r id name keep agent project kind pool; do
     [ -n "$id" ] && [ "$keep" != 1 ] || continue
-    [ "$project" = - ] && project=""
+    project="$(kb_project "$project")"
     if [ "$kind" = pool ] && [ "$pool" != - ]; then
       ( kb_api POST "/browser_pools/$pool/release" 1.2 "$project" "{\"session_id\":\"$id\",\"reuse\":false}" >/dev/null ) &
     else
       ( kb_api DELETE "/browsers/$id" 1.2 "$project" >/dev/null ) &
     fi
-  done < "$f"
-  wait
-  printf '' > "$f" 2>/dev/null
+  done
+  wait   # inside the pipeline's subshell: the deletes run there
+  }
+  printf '' > "$(kb_track_file "$sd")" 2>/dev/null
 }
 
 main >/dev/null 2>&1

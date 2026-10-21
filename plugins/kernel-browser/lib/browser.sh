@@ -47,39 +47,54 @@ kb_api() {
 }
 
 # ---- tracked browsers of one Claude Code session ----------------------------------------------------
-# <state_dir>/browsers: one line per live browser this session created, acquired or set up:
-#   id <TAB> name <TAB> keep(0|1) <TAB> agent_id <TAB> project <TAB> kind(browser|pool|setup) <TAB> pool
+# <state_dir>/browsers is an append-only event log, so parallel hooks (parallel tool calls) never lose each other's
+# writes: each change is one short line appended in one write. Events (tab-separated):
+#   +  id name keep(0|1) agent_id project kind(browser|pool|setup) pool    a browser this session created/acquired
+#   -  id-or-name                                                          deleted or released
+#   k  id-or-name keep(0|1)                                                keep flag changed
 # An empty field is written as "-": `read` with a whitespace IFS would merge consecutive tabs.
+# kb_track_live folds the log into one line per live browser: id name keep agent project kind pool.
 kb_track_file() { printf '%s/browsers' "$1"; }
 
 kb_track_add() { # <sd> <id> <name> <keep> <agent> <project> <kind> <pool>
   [ -n "$2" ] || return 0
-  kb_track_del "$1" "$2"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$2" "${3:--}" "${4:-0}" "${5:--}" "${6:--}" "${7:--}" "${8:--}" >> "$(kb_track_file "$1")" 2>/dev/null
+  printf '+\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$2" "${3:--}" "${4:-0}" "${5:--}" "${6:--}" "${7:--}" "${8:--}" >> "$(kb_track_file "$1")" 2>/dev/null
   return 0
 }
 
 kb_track_del() { # <sd> <id-or-name>
-  _kb_f="$(kb_track_file "$1")"; [ -f "$_kb_f" ] || return 0
-  awk -F'\t' -v x="$2" '$1 != x && $2 != x' "$_kb_f" > "$_kb_f.$$" 2>/dev/null && mv "$_kb_f.$$" "$_kb_f" 2>/dev/null
+  [ -n "$2" ] && [ "$2" != - ] || return 0
+  printf -- '-\t%s\n' "$2" >> "$(kb_track_file "$1")" 2>/dev/null
   return 0
 }
 
 kb_track_keep() { # <sd> <id-or-name> <0|1>
-  _kb_f="$(kb_track_file "$1")"; [ -f "$_kb_f" ] || return 0
-  awk -F'\t' -v OFS='\t' -v x="$2" -v k="$3" '($1 == x || $2 == x) { $3 = k } { print }' "$_kb_f" > "$_kb_f.$$" 2>/dev/null \
-    && mv "$_kb_f.$$" "$_kb_f" 2>/dev/null
+  [ -n "$2" ] && [ "$2" != - ] || return 0
+  printf 'k\t%s\t%s\n' "$2" "$3" >> "$(kb_track_file "$1")" 2>/dev/null
   return 0
 }
 
+kb_track_live() { # <sd>: the live set, in creation order
+  _kb_f="$(kb_track_file "$1")"; [ -s "$_kb_f" ] || return 0
+  awk -F'\t' -v OFS='\t' '
+    $1 == "+" { if (!($2 in row)) order[++n] = $2; row[$2] = $2 OFS $3 OFS $4 OFS $5 OFS $6 OFS $7 OFS $8; name[$2] = $3; next }
+    $1 == "-" { for (i in row) if (i == $2 || name[i] == $2) delete row[i]; next }
+    $1 == "k" { for (i in row) if (i == $2 || name[i] == $2) { split(row[i], f, OFS); f[3] = $3
+                  row[i] = f[1] OFS f[2] OFS f[3] OFS f[4] OFS f[5] OFS f[6] OFS f[7] } }
+    END { for (j = 1; j <= n; j++) if (order[j] in row) print row[order[j]] }' "$_kb_f" 2>/dev/null
+}
+
+# kb_project <recorded>: the project for a cleanup call: the one recorded at create, else the plugin option.
+kb_project() { if [ -n "$1" ] && [ "$1" != - ]; then printf '%s' "$1"; else kb_opt PROJECT ''; fi; }
+
 # kb_prune_gone <sd>: drop tracked browsers the API reports as gone (404); at most 6 checks, 1 s each, in parallel.
 kb_prune_gone() {
-  _kb_f="$(kb_track_file "$1")"; [ -s "$_kb_f" ] || return 0
+  [ -n "$(kb_track_live "$1")" ] || return 0
   [ -n "$(kb_key)" ] || return 0
   _kb_tmp="$(mktemp "${TMPDIR:-/tmp}/kb-prune.XXXXXX")" || return 0
-  head -6 "$_kb_f" | {
+  kb_track_live "$1" | head -6 | {
     while IFS="$KP_TAB" read -r _id _n _k _a _p _kind _pool; do
-      [ "$_p" = - ] && _p=""
+      _p="$(kb_project "$_p")"
       ( c="$(kb_api GET "/browsers/$_id" 1 "$_p" | tail -1)"; [ "$c" = 404 ] && printf '%s\n' "$_id" >> "$_kb_tmp" ) &
     done
     wait

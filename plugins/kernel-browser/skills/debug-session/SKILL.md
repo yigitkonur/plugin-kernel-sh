@@ -48,7 +48,7 @@ Read the result:
 
 Events default to a 5 minute window. Always pass `since` = `created_at`, or you will miss the failure. `until` in the future is rejected.
 
-Call `manage_browsers` with action `get_telemetry`, `session_id`, `since` = `created_at`, `compact: true`, `order` newest first and a modest `limit`. First get the type counts (count by event type), then narrow with `categories` (for example `console`, `network`, `page`, `connection`) and page with `limit` if more is needed. If the count is 0, report "no telemetry captured", then go to step 4 if `deleted_at` is null, else step 5.
+Call `manage_browsers` with action `get_telemetry`, `session_id`, `since` = `created_at`, `compact: true`, `order: "asc"` (oldest first; the server rejects `since` with `order: "desc"`) and a modest `limit`. For the newest events instead, drop `since` and pass `order: "desc"` with `until` = `deleted_at` (or now). First get the type counts (count by event type), then narrow with `categories` (for example `console`, `network`, `page`, `connection`) and page with `limit` if more is needed. If the count is 0, report "no telemetry captured", then go to step 4 if `deleted_at` is null, else step 5.
 
 Event shape: `{ seq, event: { ts, type, category, source, data } }`; `seq` is on the envelope and `ts` is microseconds. Quote a row only after reading it, with URLs stripped of query strings, and never paste whole event objects. Failure signals to look for: `console_error`, page-level `network_loading_failed`, HTTP 4xx/5xx `network_response`, crash and disconnect types.
 

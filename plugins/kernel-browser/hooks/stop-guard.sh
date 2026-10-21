@@ -14,7 +14,7 @@ main() {
   [ -n "$KP_JSON" ] || return 0
   [ "$(printf '%s' "$KP_JSON" | jq -r '.stop_hook_active // false' 2>/dev/null)" = true ] && return 0
   sd="$(kp_state_dir "$(json_get session_id)")"
-  f="$(kb_track_file "$sd")"; [ -s "$f" ] || return 0
+  [ -n "$(kb_track_live "$sd")" ] || return 0
   agent="$(printf '%s' "$KP_JSON" | jq -r '.agent_id // empty' 2>/dev/null)"
   if [ "$kind" = subagent ]; then
     [ -n "$agent" ] || return 0
@@ -23,8 +23,7 @@ main() {
     kp_once "$sd" "stop-reminded" || return 0
   fi
   kb_prune_gone "$sd"
-  [ -s "$f" ] || return 0
-  ids="$(awk -F'\t' -v a="$agent" -v k="$kind" '(k != "subagent" || $4 == a) && $3 != 1 { printf "%s%s", (n++ ? ", " : ""), ($2 != "-" ? $2 " (" $1 ")" : $1) }' "$f")"
+  ids="$(kb_track_live "$sd" | awk -F'\t' -v a="$agent" -v k="$kind" '(k != "subagent" || $4 == a) && $3 != 1 { printf "%s%s", (n++ ? ", " : ""), ($2 != "-" ? $2 " (" $1 ")" : $1) }')"
   [ -n "$ids" ] || return 0
   reason="kernel-browser: Kernel browsers created in this session are still alive: $ids. Delete each one the task no longer needs (manage_browsers action delete; pool browsers: manage_browser_pools release). If the user may continue with it, keep it and say so: idle browsers cost nothing and are deleted when this Claude Code session ends. Tag keep=after-session only if the user asked to keep it after the session."
   printf '{"decision":"block","reason":"%s"}\n' "$(printf '%s' "$reason" | json_escape)"
