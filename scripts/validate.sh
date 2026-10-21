@@ -83,6 +83,10 @@ done
 # 10 hook libraries shared between plugins stay identical to shared/lib (scripts/sync-shared.sh copies them)
 for f in shared/lib/*; do for P in $PLUGINS; do [ -f "$P/lib/${f##*/}" ] || continue; cmp -s "$f" "$P/lib/${f##*/}" || bad "$P/lib/${f##*/} differs from $f (run scripts/sync-shared.sh)"; done; done
 
+# 10b the Kernel key regex is the same literal in every plugin's hook libs
+krs="$(grep -h -o "^KP_KEY_RE='[^']*'" plugins/*/lib/*.sh | sort -u)"
+[ "$(printf '%s\n' "$krs" | grep -c .)" -le 1 ] || bad "KP_KEY_RE differs between plugins: $krs"
+
 # 9 the ledger counts quoted in the README match verified-facts.md (probe rows P*, R*, MC*)
 counts="$(awk -F'|' 'NF >= 5 && $2 ~ /^ *(P[0-9]|R[0-9]|MC[0-9])/ { v = $4; gsub(/ /, "", v); c[v]++ } END { printf "%d confirmed, %d refuted, %d gated and %d untested", c["confirmed"], c["refuted"], c["gated"], c["untested"] }' verified-facts.md)"
 grep -q -F "<!--ledger-counts-->$counts<!--/ledger-counts-->" README.md || bad "README ledger counts differ from verified-facts.md (expected: $counts)"

@@ -13,7 +13,8 @@ The hosted MCP server is for you, the coding agent, to look at and poke at a Ker
 The bundled config is `plugins/kernel-dev/.mcp.json` (an `http` server at the endpoint below).
 
 - Endpoint is `https://mcp.onkernel.com/mcp` (streamable HTTP). For clients without remote MCP: `npx -y mcp-remote https://mcp.onkernel.com/mcp` (stdio). -> https://www.kernel.sh/docs/reference/mcp-server/transports
-- Tool names inside Claude Code through this plugin: `mcp__plugin_kernel-dev_kernel__<tool>`.
+- Tool names inside Claude Code through this plugin: `mcp__plugin_kernel-dev_kernel__<tool>`. With the sibling `kernel-browser` plugin also installed, Claude Code keeps one copy of the server (the plugin installed first; checked on 2.1.306), so the prefix may be `mcp__plugin_kernel-browser_kernel__` instead.
+- For doing tasks in a cloud browser (browsing, logged-in sites, saved profiles), the `kernel-browser` plugin is the tool; this reference is about the coding agent's own checks.
 
 ## M3. Auth
 
