@@ -68,7 +68,7 @@ your laptop runs claude code; the browser runs in kernel's cloud. good when a bu
    kernel projects create agents
    kernel projects limits set agents --max-concurrent-sessions 5
    ```
-   then set the plugin's `project` option to `agents`.
+   then set the plugin's `project` option to `agents`. the agent then passes that project on every kernel call (the create guard sends back any create aimed elsewhere), so browsers and cleanup stay in the same project.
 4. want claude to reach for kernel instead of a local browser by default? add one line to your `CLAUDE.md`: "for web tasks, use the kernel-browser:browse skill (kernel cloud browsers)".
 
 options (`/plugin configure kernel-browser@plugin-kernel-sh`): `api_key`, `default_timeout_seconds` (600), `max_timeout_seconds` (1800), `project`, `cleanup_on_session_end` (on), `check_leftovers_on_start` (on).
@@ -91,7 +91,7 @@ options (`/plugin configure kernel-browser@plugin-kernel-sh`): `api_key`, `defau
 | session or subagent start | a ~150-token note: kernel browsers are here, load `browse`, five rules. with an api key it also says how many browsers older claude code sessions left alive (one api call, cached 10 min) |
 | before `manage_browsers create` | sends the call back unless it carries `tags.cc_session` (this session's id) and a `timeout_seconds` within your cap. deny, not rewrite, so your permission settings stay untouched |
 | after create / profile setup / pool acquire / delete | remembers which browsers this session made |
-| the agent ends a turn with browsers alive | reminds it once, with the ids |
+| the agent ends a turn with browsers alive | reminds it once, with the ids. claude code labels any blocking stop hook "Stop hook error occurred": that's this reminder, not a failure |
 | the session ends | deletes the browsers this session made (not ones tagged `keep: "after-session"`, which the agent sets only when you ask). needs the api key |
 | before any kernel mcp call, edit or bash command | blocks a kernel api key or a 1password service-account token in the input |
 | after any kernel mcp call | masks `cdp_ws_url`, `webdriver_ws_url`, `base_url` and key literals in the result before the model reads them (the live-view url stays: you need it) |

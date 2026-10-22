@@ -12,7 +12,7 @@ Goal: a Kernel profile that opens signed in to one site, a name the user can reu
 
 The argument is the text after the skill name (or the line starting `ARGUMENTS:`): a domain such as `github.com`. If missing, ask and stop. Lower-case it and check it is a hostname (`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`, at most 253 characters); otherwise say so and stop. Profile and credential names you choose: `^[A-Za-z0-9._-]{1,64}$`.
 
-Tools are the Kernel MCP tools; give each call a one-line `context`. Pass `project` when the user named one.
+Tools are the Kernel MCP tools; give each call a one-line `context`. Pass `project` when the kernel-browser note at session start names one (the plugin's `project` option) or the user named one.
 
 ## Rules
 - Never ask for, accept or type a password, one-time code or TOTP seed in chat or in a tool input (`manage_credentials` `values`, `manage_auth_connections` `submit` `field_values`, `manage_vault_credentials` field values, Playwright code, `computer_action` typing). The user types secrets into a Kernel-hosted page, a live view or their 1Password app; the script in Path C reads them from environment variables.

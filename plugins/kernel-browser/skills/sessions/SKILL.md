@@ -12,7 +12,7 @@ Goal: the user sees what is alive in Kernel and who left it there, and leftovers
 
 The argument is the text after the skill name (or the line starting `ARGUMENTS:`). `clean` means: go straight to the cleanup question after listing. It never skips the confirmation: a browser from another Claude Code session may belong to a session that is still running in another terminal.
 
-Use the Kernel MCP tools with a one-line `context` on each call; pass `project` if the user named one. Never print a browser URL of any kind.
+Use the Kernel MCP tools with a one-line `context` on each call; pass `project` if the kernel-browser note at session start names one (the plugin's `project` option) or the user named one. Never print a browser URL of any kind.
 
 ## Step 1. Collect
 1. `manage_browsers` `action: list`, `status: "active"`, `limit: 100`. If 100 come back, call again with `offset: 100`, and so on, until a page is shorter than the limit.
