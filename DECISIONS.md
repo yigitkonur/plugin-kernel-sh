@@ -50,3 +50,17 @@ Why the plugin looks the way it does. Each row is something a contributor might 
 ## Keeping it current
 
 Kernel ships every one to three days. `scripts/check-freshness.sh` (weekly in CI) compares the latest SDK and CLI with `verified-against.md`, lists new `@deprecated` tags as candidate stale-API rules, and opens an issue. `lab/` re-checks the key facts live.
+
+## kernel-browser (2026-10-22)
+
+| Decision | Reason |
+|---|---|
+| A second plugin instead of a mode of `kernel-dev` | Users who only want Claude Code to browse should not load SDK guidance, and coders should not get browsing hooks. Install-time choice is the plugin choice. |
+| Both plugins bundle the same MCP server | Each works alone. With both installed Claude Code keeps one copy (the plugin installed first; KB12), so the hooks match both tool prefixes and a plain `kernel` server. |
+| The create guard denies instead of rewriting input | PreToolUse `updatedInput` needs an "allow" or "ask" decision, which would change the user's permission behavior. A deny with the exact values to resend costs one extra call and leaves permissions alone (KB3). |
+| Tracking is per Claude Code session, cleanup at SessionEnd | Kernel has no "delete when the client goes away"; its only automatic close is the idle timeout. Tags plus a local list let SessionEnd delete only what this session created, never anyone else's browsers. |
+| The stop hook reminds once instead of blocking every turn | KB1 showed touched browsers idle out on time and idle costs nothing, so a browser kept between turns is fine; the reminder catches the forgotten case, SessionEnd and the timeout do the rest. |
+| `keep: "after-session"` only on the user's request | Otherwise an agent tags everything to silence the reminder and the leak returns. |
+| Hooks call the Kernel API only with an `api_key` option or `KERNEL_API_KEY` | The MCP's OAuth token is not available to hooks. Without a key the hooks still guard and track; nothing is sent. |
+| `audit` and `profile-site` stay in `kernel-dev` only | `audit` reviews code; `profile-site` needs `npm ci` and an SDK analyzer, the SDK machinery this plugin exists to avoid. `browse` covers blocks with the unblock ladder and `manage_config_registry`. |
+| No tests for the new hooks in this release | Built and verified live first (KB rows); a test pass for the proven hooks follows separately. |

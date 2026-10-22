@@ -1,0 +1,60 @@
+{
+  "name": "kernel-browser",
+  "version": "1.0.0",
+  "description": "Use Kernel (kernel.sh) cloud browsers as Claude Code's browser: saved logins in profiles, 1Password and hosted sign-in, safe parallel browsing, and hooks that tag, track and delete the browsers a session creates.",
+  "author": {
+    "name": "yigitkonur",
+    "url": "https://github.com/yigitkonur"
+  },
+  "homepage": "https://github.com/yigitkonur/plugin-kernel-sh",
+  "repository": "https://github.com/yigitkonur/plugin-kernel-sh",
+  "license": "MIT",
+  "keywords": ["kernel", "kernel.sh", "cloud-browser", "browser-agent", "web-automation", "mcp", "1password", "managed-auth"],
+  "userConfig": {
+    "api_key": {
+      "type": "string",
+      "title": "Kernel API key (optional)",
+      "description": "Only for the cleanup hooks: deleting this session's leftover browsers when it ends and counting leftovers at start. Stored in the OS keychain. The Kernel MCP itself signs in with OAuth through /mcp. Falls back to KERNEL_API_KEY.",
+      "sensitive": true,
+      "required": false
+    },
+    "default_timeout_seconds": {
+      "type": "number",
+      "title": "Suggested idle timeout (seconds)",
+      "description": "The timeout the create guard suggests for new browsers. It counts idle time only; idle browsers cost nothing.",
+      "default": 600,
+      "min": 30,
+      "max": 86400,
+      "required": false
+    },
+    "max_timeout_seconds": {
+      "type": "number",
+      "title": "Maximum idle timeout (seconds)",
+      "description": "Browser creates above this are sent back to the agent to resend with a lower timeout.",
+      "default": 1800,
+      "min": 60,
+      "max": 259200,
+      "required": false
+    },
+    "project": {
+      "type": "string",
+      "title": "Kernel project (optional)",
+      "description": "Project name or id the cleanup calls use (match the project your agent browsers run in).",
+      "required": false
+    },
+    "cleanup_on_session_end": {
+      "type": "boolean",
+      "title": "Delete leftover browsers when a session ends",
+      "description": "Deletes the browsers this Claude Code session created and did not delete, except ones tagged keep=after-session. Needs the API key.",
+      "default": true,
+      "required": false
+    },
+    "check_leftovers_on_start": {
+      "type": "boolean",
+      "title": "Count leftover browsers at session start",
+      "description": "One Kernel API call at session start (cached 10 minutes) to report browsers earlier Claude Code sessions left alive. Needs the API key.",
+      "default": true,
+      "required": false
+    }
+  }
+}

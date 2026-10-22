@@ -6,7 +6,7 @@
 # With --issue, opens a GitHub issue (needs gh auth) when anything changed and no open "freshness" issue exists.
 set -u
 cd "$(git rev-parse --show-toplevel)"
-VA=plugins/kernel/skills/kernel/references/verified-against.md
+VA=plugins/kernel-dev/skills/kernel/references/verified-against.md
 vsdk="$(sed -n 's/^| `@onkernel\/sdk` | \([0-9.]*\).*/\1/p' "$VA" | head -1)"
 vcli="$(sed -n 's/^| `kernel` CLI | \([0-9.]*\).*/\1/p' "$VA" | head -1)"
 lsdk="$(npm view @onkernel/sdk version 2>/dev/null)"; lcli="$(npm view @onkernel/cli version 2>/dev/null)"

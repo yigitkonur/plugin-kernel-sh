@@ -7,7 +7,7 @@
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 R="$(cd "$HERE/.." && pwd)"
-P="$R/plugins/kernel"
+P="$R/plugins/kernel-dev"
 F="$HERE/fixtures"
 
 if [ "${1:-}" = "--all-shells" ]; then

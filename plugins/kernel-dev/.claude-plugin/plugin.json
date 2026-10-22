@@ -1,0 +1,22 @@
+{
+  "name": "kernel-dev",
+  "version": "2.0.0",
+  "description": "Steering for Kernel (kernel.sh) cloud browsers in TypeScript projects: a live-tested knowledge skill, debugging and login workflows, hooks that catch deprecated fields and leaked API keys, and the Kernel MCP server.",
+  "author": {
+    "name": "yigitkonur",
+    "url": "https://github.com/yigitkonur"
+  },
+  "homepage": "https://github.com/yigitkonur/plugin-kernel-sh",
+  "repository": "https://github.com/yigitkonur/plugin-kernel-sh",
+  "license": "MIT",
+  "keywords": [
+    "kernel",
+    "kernel.sh",
+    "browser-automation",
+    "cloud-browsers",
+    "playwright",
+    "typescript",
+    "mcp",
+    "ai-agents"
+  ]
+}
