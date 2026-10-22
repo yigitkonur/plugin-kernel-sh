@@ -2,6 +2,11 @@
 
 Versions are per plugin since 2026-10-22; tags are `<plugin>--v<version>`.
 
+## kernel-browser 1.0.1 - 2026-10-22
+
+- The `project` option now steers where browsers are created, not only where cleanup looks: the primer tells the agent to pass it on every Kernel call, and the create guard sends back a browser create, pool create or acquire, or profile setup aimed at another project. Before, browsers could land in the connection's default project while cleanup looked in the configured one and silently did nothing.
+- README: Claude Code labels the once-per-session stop reminder "Stop hook error occurred"; the README says so. The 1.x upgrade note and install receipts (KB15) are in.
+
 ## kernel-browser 1.0.0 and kernel-dev 2.0.0 - 2026-10-22
 
 - New plugin **`kernel-browser`**: Claude Code uses Kernel cloud browsers as its browser through the Kernel MCP server. Skills `browse`, `login` (hosted login, live view, 1Password Agentic Autofill, stored credential), `sessions` (list and clean up), plus `debug-session`, `diff-profiles` and `site-skill` adapted to the MCP tools. Hooks: a short primer with a leftover count, a create guard (session tag and capped idle timeout, by deny), browser tracking, a once-per-session stop reminder, deletion of the session's browsers at SessionEnd (needs an API key option), a key and 1Password-token guard on MCP input, and masking of browser control URLs in MCP results. `userConfig`: `api_key` (keychain), `default_timeout_seconds`, `max_timeout_seconds`, `project`, `cleanup_on_session_end`, `check_leftovers_on_start`.

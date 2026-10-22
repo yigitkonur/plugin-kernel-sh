@@ -26,7 +26,9 @@ main() {
   kp_read_stdin
   [ -n "$KP_JSON" ] || return 0
   sid="$(json_get session_id)"
-  text="[kernel-browser] Kernel cloud browsers are available through the Kernel MCP tools (manage_browsers, execute_playwright_code, browser_repl, computer_action). For web tasks that should run off this machine, on logged-in sites saved in Kernel profiles, or on sites that block bots, load the skill kernel-browser:browse first. Rules: reuse a saved profile read-only (never two writers); create browsers with tags.cc_session=\"$sid\" and an explicit timeout_seconds; delete a browser when its task is done; never type passwords or 2FA codes from chat (use kernel-browser:login); confirm a submit, send or purchase with the user and never repeat one whose outcome is unknown."
+  proj="$(kb_opt PROJECT '')"; pnote=""
+  [ -n "$proj" ] && pnote=" Pass project=\"$proj\" on every Kernel call (the plugin's project option)."
+  text="[kernel-browser] Kernel cloud browsers are available through the Kernel MCP tools (manage_browsers, execute_playwright_code, browser_repl, computer_action). For web tasks that should run off this machine, on logged-in sites saved in Kernel profiles, or on sites that block bots, load the skill kernel-browser:browse first. Rules: reuse a saved profile read-only (never two writers); create browsers with tags.cc_session=\"$sid\" and an explicit timeout_seconds; delete a browser when its task is done; never type passwords or 2FA codes from chat (use kernel-browser:login); confirm a submit, send or purchase with the user and never repeat one whose outcome is unknown.$pnote"
   if [ "$kind" = session ]; then
     n="$(leftovers "$sid")"
     [ -n "$n" ] && [ "$n" -gt 0 ] 2>/dev/null && text="$text Note: $n Kernel browser(s) from earlier Claude Code sessions are still alive (they hold concurrency slots); /kernel-browser:sessions lists and cleans them."

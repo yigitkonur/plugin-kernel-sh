@@ -1,6 +1,6 @@
 {
   "name": "kernel-browser",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Use Kernel (kernel.sh) cloud browsers as Claude Code's browser: saved logins in profiles, 1Password and hosted sign-in, safe parallel browsing, and hooks that tag, track and delete the browsers a session creates.",
   "author": {
     "name": "yigitkonur",
@@ -9,7 +9,16 @@
   "homepage": "https://github.com/yigitkonur/plugin-kernel-sh",
   "repository": "https://github.com/yigitkonur/plugin-kernel-sh",
   "license": "MIT",
-  "keywords": ["kernel", "kernel.sh", "cloud-browser", "browser-agent", "web-automation", "mcp", "1password", "managed-auth"],
+  "keywords": [
+    "kernel",
+    "kernel.sh",
+    "cloud-browser",
+    "browser-agent",
+    "web-automation",
+    "mcp",
+    "1password",
+    "managed-auth"
+  ],
   "userConfig": {
     "api_key": {
       "type": "string",

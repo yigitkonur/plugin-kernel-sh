@@ -8,7 +8,7 @@
       { "hooks": [ { "type": "command", "command": "sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/primer.sh", "subagent"], "timeout": 5 } ] }
     ],
     "PreToolUse": [
-      { "matcher": "^mcp__(plugin_kernel-(browser|dev)_)?kernel__(manage_browsers|manage_browser_pools)$",
+      { "matcher": "^mcp__(plugin_kernel-(browser|dev)_)?kernel__(manage_browsers|manage_browser_pools|manage_profiles)$",
         "hooks": [ { "type": "command", "command": "sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/create-guard.sh"], "timeout": 5 } ] },
       { "matcher": "^(Edit|Write|MultiEdit|NotebookEdit|Bash)$|^mcp__(plugin_kernel-(browser|dev)_)?kernel__",
         "hooks": [ { "type": "command", "command": "sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/secret-guard.sh"], "timeout": 5 } ] }

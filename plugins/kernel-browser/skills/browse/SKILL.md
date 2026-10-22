@@ -22,7 +22,7 @@ Tool names below are the Kernel MCP tools (`mcp__plugin_kernel-browser_kernel__<
 
 ## Step 1. List this session's browsers (always, first)
 1. Your first Kernel call for every task: `manage_browsers` `action: list` with `tags: { cc_session: "<this session id>" }` (the id is in the kernel-browser note at the start of this session, or in a create-guard message). Do it even when the session looks new: an earlier turn, a subagent, a resumed session or the user may have left a browser for you. Note each one's `session_id`, `name` and `profile.name`.
-2. If the user named a Kernel project, pass `project` on every call. If you are about to create several browsers or are unsure which org this is, call `get_connection_context` once.
+2. If the kernel-browser note at session start names a project (the plugin's `project` option), or the user named one, pass `project` on every call: browsers live in that project and the cleanup hooks look there. If you are about to create several browsers or are unsure which org this is, call `get_connection_context` once.
 
 ## Step 2. Which identity
 Does the task need the user to be signed in? Public pages do not: go to Step 3 without a profile.
