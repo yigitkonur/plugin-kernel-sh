@@ -42,7 +42,7 @@ claude plugin marketplace update plugin-kernel-sh && claude plugin update kernel
 claude plugin uninstall kernel-browser@plugin-kernel-sh
 ```
 
-**coming from 1.x?** the old plugin was called `kernel`. it's now `kernel-dev` (2.0.0), same content, skills under `/kernel-dev:`. run `claude plugin uninstall kernel@plugin-kernel-sh`, then install `kernel-dev`.
+**coming from 1.x?** the old plugin was called `kernel`. it's now `kernel-dev` (2.0.0), same content, skills under `/kernel-dev:`. after a marketplace update the old one shows "failed to load" in `claude plugin list`; run `claude plugin uninstall kernel@plugin-kernel-sh`, then `claude plugin install kernel-dev@plugin-kernel-sh`.
 
 ### what you need
 
@@ -142,6 +142,7 @@ makes coding agents use kernel the right way in typescript projects: *when and w
 
 - **kernel-dev live probes.** 23 topic probes against a real kernel account on 2026-10-20 (sdk 0.127.0, types re-checked on 0.129.0; cli 0.49.0). the ledger has <!--ledger-counts-->137 confirmed, 43 refuted, 5 gated and 14 untested<!--/ledger-counts--> rows, plus 24 naive-agent task runs that passed 23 of 23 with cleanup verified every time.
 - **kernel-browser live runs** (2026-10-22, claude code 2.1.306, the plugin loaded with a bearer-key mcp config): the idle-timeout leak test, the create guard, the stop reminder plus session-end delete, a browse task with a screenshot, a stored-credential login and two simultaneous readers of one profile, choosing between two profiles and reusing a live browser, url masking and the key guard on mcp input. each row and what went wrong on the way is in [verified-facts.md](verified-facts.md).
+- **installs.** the one-liners above were run from github after the 2.0.0 / 1.0.0 release in clean claude code configs (2.1.306): both plugins install, the installed files match `main`, update and uninstall work, and the 1.x → `kernel-dev` upgrade path was run end to end.
 - **mcp findings.** what we hit in kernel's mcp server while building this, with evidence: [MCP-FINDINGS.md](MCP-FINDINGS.md).
 - **not verified:** the interactive oauth sign-in to the bundled mcp server (the bearer-key variant is verified), 1password agentic autofill end to end (not enabled on the test org), payments, gpu browsers, windows.
 
