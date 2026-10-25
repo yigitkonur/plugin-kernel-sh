@@ -2,6 +2,10 @@
 
 Versions are per plugin since 2026-10-22; tags are `<plugin>--v<version>`.
 
+## kernel-browser 1.1.0 - 2026-10-25
+
+- feat: run in Codex too, off by default (9d3ac69)
+
 ## kernel-dev 2.1.0 - 2026-10-25
 
 - feat: run in Codex too, off by default (9d3ac69)
