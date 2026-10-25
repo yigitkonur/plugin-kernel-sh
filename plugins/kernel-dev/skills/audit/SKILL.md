@@ -47,7 +47,7 @@ out=$(kernel org limits get -o json) && jq '{used: .concurrent_sessions_used, fr
 out=$(kernel browsers list --status active --limit 100 -o json) && jq 'def red: if type=="string" then gsub("sk_[A-Za-z0-9_.-]+";"sk_***") | gsub("https?://[^ ]+";"<url>") | .[0:60] else . end; [.[] | {session_id, name: (.name|red), created_at, timeout_seconds, headless, tags: ((.tags // {}) | with_entries(.key |= red | .value |= red))}]' <<<"$out" || echo "could not check: browsers list"
 ```
 
-(`kernel-plugin` is the plugin's helper in `bin/`; if it is not on PATH, call it as `"${CLAUDE_PLUGIN_ROOT}/bin/kernel-plugin"`. The keys of `auth context`, `status`, `org limits get` and `org entitlements` (`features`, `plan`) were verified live; the `jq` projections above are built from those keys and were not each run for this skill.)
+(`kernel-plugin` is the plugin's helper in `bin/`; if it is not on PATH (Codex does not add a plugin's `bin/` to PATH), call it as `../../bin/kernel-plugin` relative to this skill's folder. The keys of `auth context`, `status`, `org limits get` and `org entitlements` (`features`, `plan`) were verified live; the `jq` projections above are built from those keys and were not each run for this skill.)
 
 Read the results:
 - `detect` says `detected: false`: tell the user no Kernel usage was found at that path and stop, unless they named the path on purpose.

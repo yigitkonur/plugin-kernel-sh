@@ -1,0 +1,32 @@
+{
+  "name": "plugin-kernel-sh",
+  "interface": {
+    "displayName": "Kernel (kernel.sh)"
+  },
+  "plugins": [
+    {
+      "name": "kernel-dev",
+      "source": {
+        "source": "local",
+        "path": "./plugins/kernel-dev"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    },
+    {
+      "name": "kernel-browser",
+      "source": {
+        "source": "local",
+        "path": "./plugins/kernel-browser"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

@@ -23,7 +23,7 @@ Rules for the whole run:
 - CLI fallback only: check the exit code before parsing. `-o json` errors are plain text on stderr with exit 1 and stdout stays empty, so never pipe a `kernel` command straight into `jq` (empty input makes `jq` exit 0 and the failure looks like success). Capture first: `out=$(kernel ... -o json) && jq '...' <<<"$out" || echo "could not run: <what>"`, or redirect to a file with `|| { ...; }`.
 - Every MCP call takes a one-line `context` (why you call it).
 
-Tool note: MCP tool names are `mcp__plugin_kernel-browser_kernel__<tool>`; this file just names the tool. Driving surfaces: `../browse/references/tools.md`.
+Tool note: MCP tool names are `mcp__plugin_kernel-browser_kernel__<tool>` in Claude Code and `kernel_mcp.<tool>` in Codex; this file just names the tool. Driving surfaces: `../browse/references/tools.md`.
 
 ## 1. Read the session record
 

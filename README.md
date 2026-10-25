@@ -12,7 +12,7 @@ the facts in here were checked against `@onkernel/sdk`, the `kernel` cli, the ke
 <!-- kit:install:start -->
 ## install
 
-Every plugin of ours is installed **once, globally, and off**, then **turned on per project**. Nothing runs and no tokens are spent in chats that don't switch it on. It works the same in Claude Code and Codex (this one is Claude Code only for now: no Codex port yet).
+Every plugin of ours is installed **once, globally, and off**, then **turned on per project**. Nothing runs and no tokens are spent in chats that don't switch it on. It works the same in Claude Code and Codex.
 
 ### 1. install them globally
 
@@ -22,6 +22,16 @@ Every plugin of ours is installed **once, globally, and off**, then **turned on 
 claude plugin marketplace add yigitkonur/plugin-kernel-sh
 claude plugin install kernel-dev@plugin-kernel-sh -s user          # stays off: defaultEnabled is false in the manifest
 claude plugin install kernel-browser@plugin-kernel-sh -s user
+```
+
+**Codex** (0.163+)
+
+```sh
+codex plugin marketplace add yigitkonur/plugin-kernel-sh
+codex plugin add kernel-dev@plugin-kernel-sh
+codex plugin add kernel-browser@plugin-kernel-sh
+codex-plugin-project.sh global-off kernel-dev@plugin-kernel-sh     # Codex has no enable/disable command; this keeps it off everywhere
+codex-plugin-project.sh global-off kernel-browser@plugin-kernel-sh
 ```
 
 All our plugins, both hosts, plus the `plugin` command and the 6-hourly update job, in one line:
@@ -34,7 +44,7 @@ curl -fsSL https://raw.githubusercontent.com/yigitkonur/plugin-kit/main/install.
 
 ```sh
 cd your-project
-plugin on kernel-dev    # Claude Code, this folder only
+plugin on kernel-dev    # Claude Code and Codex, this folder only
 plugin off kernel-dev   # undo
 plugin                  # or pick from a list (TUI)
 ```
@@ -44,9 +54,12 @@ By hand, without the `plugin` command:
 ```sh
 claude plugin enable kernel-dev@plugin-kernel-sh --scope project      # undo: claude plugin disable kernel-dev@plugin-kernel-sh --scope project
 claude plugin enable kernel-browser@plugin-kernel-sh --scope project      # undo: claude plugin disable kernel-browser@plugin-kernel-sh --scope project
+codex-plugin-project.sh on kernel-dev@plugin-kernel-sh . --trust      # undo: codex-plugin-project.sh off kernel-dev@plugin-kernel-sh
+codex-plugin-project.sh on kernel-browser@plugin-kernel-sh . --trust      # undo: codex-plugin-project.sh off kernel-browser@plugin-kernel-sh
 ```
 
-Restart `claude` in that folder afterwards.
+Restart `claude` / `codex` in that folder afterwards.
+Codex reads a folder's `.codex/config.toml` only when the folder is trusted; `--trust` adds that, and it also enables the folder's hooks and rules, so use it for your own projects only. `plugin` and `codex-plugin-project.sh` come from [plugin-kit](https://github.com/yigitkonur/plugin-kit) (the one-line installer above).
 
 ### 3. updates
 
@@ -54,6 +67,7 @@ A plugin updates only when its `version` changes, and this repo's `release` work
 
 ```sh
 claude plugin marketplace update plugin-kernel-sh && claude plugin update kernel-dev@plugin-kernel-sh
+codex plugin marketplace upgrade plugin-kernel-sh        # then start a new session
 ```
 
 No GitHub SSH key on the machine? `export CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` (`plugin install` sets it in Claude's settings for you).
@@ -64,6 +78,9 @@ No GitHub SSH key on the machine? `export CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` (`p
 claude plugin uninstall kernel-dev@plugin-kernel-sh -s user
 claude plugin uninstall kernel-browser@plugin-kernel-sh -s user
 claude plugin marketplace remove plugin-kernel-sh
+codex plugin remove kernel-dev@plugin-kernel-sh
+codex plugin remove kernel-browser@plugin-kernel-sh
+codex plugin marketplace remove plugin-kernel-sh
 ```
 <!-- kit:install:end -->
 
@@ -73,7 +90,7 @@ the old plugin was called `kernel`. it's now `kernel-dev` (2.0.0), same content,
 
 ### two plugins, one marketplace
 
-the marketplace `plugin-kernel-sh` carries both `kernel-browser` and `kernel-dev`; install and switch on whichever you need, or both. `kernel-browser` will say "6 userConfig options not yet set" once installed: they're all optional, see its setup below. these plugins are claude code only; there is no codex package.
+the marketplace `plugin-kernel-sh` carries both `kernel-browser` and `kernel-dev`; install and switch on whichever you need, or both. `kernel-browser` will say "6 userConfig options not yet set" once installed: they're all optional, see its setup below. codex runs the same two plugins: see the "on codex" notes under each plugin below.
 
 ### what you need
 
@@ -148,6 +165,17 @@ options (`/plugin configure kernel-browser@plugin-kernel-sh`): `api_key`, `defau
 - page content is treated as data: the skills tell the agent never to follow instructions found on a page, and to ask before any submit, send, post, delete or purchase.
 - unlike `kernel-dev`, these hooks make network calls, and only with an api key configured: one list call at session start (count of leftovers, `check_leftovers_on_start`), a status check on this session's browsers when a turn ends, and deletes at session end (`cleanup_on_session_end`). nothing else leaves your machine.
 
+### kernel-browser on codex
+
+same plugin, same skills and hooks, installed globally and off, switched on per project (`plugin on kernel-browser`, see install above). what's different:
+
+- **sign in once:** `codex mcp login kernel_mcp`. the plugin's server is called `kernel_mcp` in codex (claude code: `kernel`) because `kernel` is the name of the kernel app in codex's connector list. if you also connected that app, codex may use its tools (`kernel.<tool>`) instead; the hooks cover both. tool names: claude code `mcp__plugin_kernel-browser_kernel__<tool>`, codex `kernel_mcp.<tool>`.
+- **settings are environment variables** (codex has no plugin settings). export them in the shell that starts `codex`: `KERNEL_API_KEY` (cleanup hooks only), `KERNEL_BROWSER_DEFAULT_TIMEOUT_SECONDS` (600), `KERNEL_BROWSER_MAX_TIMEOUT_SECONDS` (1800), `KERNEL_BROWSER_PROJECT`, `KERNEL_BROWSER_CLEANUP_ON_SESSION_END` (true), `KERNEL_BROWSER_CHECK_LEFTOVERS_ON_START` (true), and `KERNEL_BROWSER_HOOKS=off` to mute the hooks. in claude code the `/plugin configure` values win when both are set.
+- **trust the hooks once:** the first codex session in a project shows "hooks need review"; open `/hooks` and trust them.
+- **what runs:** the session and subagent primer, the create guard (tag and timeout), tracking, the once-per-session stop reminder, the key guard (also on `apply_patch`, codex's file-write tool) and the delete-at-session-end cleanup (codex gives hooks 3 s there; needs `KERNEL_API_KEY`).
+- **what doesn't:** result masking. codex ignores `updatedMCPToolOutput`, so `cdp_ws_url`, `webdriver_ws_url` and `base_url` stay visible to the model; the primer tells the agent to treat them as secrets. there are no `/kernel-browser:...` slash commands; ask for the skill by name ("use kernel-browser:browse to ...").
+- **not verified on codex:** the oauth sign-in end to end (the login url is reached, the sign-in itself wasn't completed), `SubagentStart` / `SubagentStop` hooks, and any call to a real kernel account through the plugin's own `kernel_mcp` server.
+
 ## kernel-dev: writing code on kernel (was `kernel`)
 
 makes coding agents use kernel the right way in typescript projects: *when and why* to reach for each feature, flags deprecated fields the moment they get written, keeps api keys out of your code, and ships workflows for the stuff that actually hurts.
@@ -169,6 +197,15 @@ makes coding agents use kernel the right way in typescript projects: *when and w
 
 `kernel-dev` needs the `kernel` cli for the workflows (`brew install kernel/tap/kernel` or `npm i -g @onkernel/cli`) and `KERNEL_API_KEY` in your environment or a gitignored `.env`. its hooks make no network calls; detection scans manifests, ci files and `.env*` files for kernel marker *names* (never values). the key guard is a speed bump, not a vault: it won't catch a key split across lines or one in a subagent prompt.
 
+### kernel-dev on codex
+
+same plugin, installed globally and off, switched on per project (`plugin on kernel-dev`, see install above). what's different:
+
+- **sign in once:** `codex mcp login kernel_mcp` (the server is `kernel_mcp` in codex, `kernel` in claude code; tools are `kernel_mcp.<tool>`). `KERNEL_API_KEY` in your environment or a gitignored `.env` is still what the workflows and the `kernel` cli use.
+- **trust the hooks once:** the first codex session in a project shows "hooks need review"; open `/hooks` and trust them. `KERNEL_PLUGIN_HOOKS=off` mutes them.
+- **what runs:** the primer (kernel projects only), the deprecated-identifier tripwire after an `apply_patch` (codex's file-write tool; reports the first patched file with a finding) and the key guard on `apply_patch` and shell commands.
+- **what doesn't:** no `/kernel-dev:...` slash commands; ask for the skill by name ("use kernel-dev:audit on this project"). codex doesn't put a plugin's `bin/` on `PATH`, so the skills call the `kernel-plugin` helper by its path inside the plugin when it isn't found.
+
 ## receipts
 
 - **kernel-dev live probes.** 23 topic probes against a real kernel account on 2026-10-20 (sdk 0.127.0, types re-checked on 0.129.0; cli 0.49.0). the ledger has <!--ledger-counts-->137 confirmed, 43 refuted, 5 gated and 14 untested<!--/ledger-counts--> rows, plus 24 naive-agent task runs that passed 23 of 23 with cleanup verified every time.
@@ -181,8 +218,10 @@ makes coding agents use kernel the right way in typescript projects: *when and w
 
 ```
 .claude-plugin/marketplace.json   marketplace "plugin-kernel-sh": kernel-browser, kernel-dev
+.agents/plugins/marketplace.json  the same marketplace for codex
 plugins/kernel-browser/           skills/ hooks/ lib/ .mcp.json (only this directory gets installed)
 plugins/kernel-dev/               skills/ hooks/ lib/ rules/ bin/ .mcp.json
+plugins/*/.codex-plugin/          codex manifest; with .codex-mcp.json and hooks/codex-hooks.json next to the claude files
 shared/lib/                       hook library copied into both plugins (scripts/sync-shared.sh)
 tests/                            kernel-dev hook, detection and rule tests (sh tests/run.sh)
 lab/                              maintainer smoke tests against the live api

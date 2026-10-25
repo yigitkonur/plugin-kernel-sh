@@ -1,20 +1,26 @@
 # browser.sh -- kernel-browser hook helpers. POSIX sh, sourced after lib/common.sh. Never aborts the caller.
 #
 # Env: KERNEL_BROWSER_HOOKS=off              silences every kernel-browser hook
-#      CLAUDE_PLUGIN_OPTION_<KEY>            plugin userConfig values (api_key, default_timeout_seconds, ...)
+#      CLAUDE_PLUGIN_OPTION_<KEY>            plugin userConfig values (api_key, default_timeout_seconds, ...); Claude Code only
+#      KERNEL_BROWSER_<KEY>                  the same options as plain env variables (Codex has no plugin settings): KERNEL_BROWSER_
+#                                            DEFAULT_TIMEOUT_SECONDS, _MAX_TIMEOUT_SECONDS, _PROJECT, _CLEANUP_ON_SESSION_END,
+#                                            _CHECK_LEFTOVERS_ON_START. The API key is KERNEL_API_KEY on both hosts.
 #      KERNEL_API_KEY, KERNEL_BASE_URL       fallback credentials / API host for the cleanup calls
 
-# Kernel MCP tools, whichever copy of the server Claude Code kept: this plugin's, kernel-dev's, or a user/project
-# server named "kernel" (e.g. from `kernel mcp install`).
-KB_TOOL_RE='^mcp__(plugin_kernel-(browser|dev)_)?kernel__'
+# Kernel MCP tools, whichever copy of the server the host kept: this plugin's, kernel-dev's, or a user/project server
+# named "kernel" (e.g. from `kernel mcp install`). Codex: this plugin's server is "kernel_mcp" (the name "kernel" is taken
+# by the Kernel app in Codex's connector list, which reaches hooks as mcp__codex_apps__kernel__<tool>).
+KB_TOOL_RE='^mcp__(codex_apps__)?(plugin_kernel-(browser|dev)_)?kernel(_mcp)?__'
 # Same literal as kernel-dev's lib/rules.sh (scripts/validate.sh checks they match).
 KP_KEY_RE='sk_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.[A-Za-z0-9_-]{20,}'
 
 kb_off() { [ "${KERNEL_BROWSER_HOOKS:-}" = "off" ]; }
 
-# kb_opt <KEY> <default>: a userConfig value (exported by Claude Code as CLAUDE_PLUGIN_OPTION_<KEY>) or the default.
+# kb_opt <KEY> <default>: a userConfig value (exported by Claude Code as CLAUDE_PLUGIN_OPTION_<KEY>), else KERNEL_BROWSER_<KEY>
+# from the environment (the Codex way; never for API_KEY, which is KERNEL_API_KEY), else the default.
 kb_opt() {
   eval "_kb_v=\${CLAUDE_PLUGIN_OPTION_$1:-}"
+  if [ -z "$_kb_v" ] && [ "$1" != API_KEY ]; then eval "_kb_v=\${KERNEL_BROWSER_$1:-}"; fi
   if [ -n "$_kb_v" ]; then printf '%s' "$_kb_v"; else printf '%s' "$2"; fi
 }
 
@@ -22,7 +28,7 @@ kb_opt() {
 kb_tool() {
   _kb_t="$(json_get tool_name)"
   printf '%s' "$_kb_t" | grep -E -q "${KB_TOOL_RE}" || return 0
-  printf '%s' "${_kb_t##*kernel__}"
+  printf '%s' "${_kb_t##*__}"
 }
 
 # kb_key: the API key for the cleanup calls (plugin option first, then KERNEL_API_KEY), or nothing.

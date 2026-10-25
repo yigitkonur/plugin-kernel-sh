@@ -25,7 +25,7 @@ main() {
   kb_prune_gone "$sd"
   ids="$(kb_track_live "$sd" | awk -F'\t' -v a="$agent" -v k="$kind" '(k != "subagent" || $4 == a) && $3 != 1 { printf "%s%s", (n++ ? ", " : ""), ($2 != "-" ? $2 " (" $1 ")" : $1) }')"
   [ -n "$ids" ] || return 0
-  reason="kernel-browser: Kernel browsers created in this session are still alive: $ids. Delete each one the task no longer needs (manage_browsers action delete; pool browsers: manage_browser_pools release). If the user may continue with it, keep it and say so: idle browsers cost nothing and are deleted when this Claude Code session ends. Tag keep=after-session only if the user asked to keep it after the session."
+  reason="kernel-browser: Kernel browsers created in this session are still alive: $ids. Delete each one the task no longer needs (manage_browsers action delete; pool browsers: manage_browser_pools release). If the user may continue with it, keep it and say so: idle browsers cost nothing and are deleted when this $KP_HOST_NAME session ends. Tag keep=after-session only if the user asked to keep it after the session."
   printf '{"decision":"block","reason":"%s"}\n' "$(printf '%s' "$reason" | json_escape)"
 }
 

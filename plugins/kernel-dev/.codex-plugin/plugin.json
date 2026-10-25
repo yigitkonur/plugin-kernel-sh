@@ -1,0 +1,40 @@
+{
+  "name": "kernel-dev",
+  "version": "2.0.2",
+  "description": "Steering for Kernel (kernel.sh) cloud browsers in TypeScript projects: a live-tested knowledge skill, debugging and login workflows, hooks that catch deprecated fields and leaked API keys, and the Kernel MCP server.",
+  "author": {
+    "name": "yigitkonur",
+    "url": "https://github.com/yigitkonur"
+  },
+  "homepage": "https://github.com/yigitkonur/plugin-kernel-sh",
+  "repository": "https://github.com/yigitkonur/plugin-kernel-sh",
+  "license": "MIT",
+  "keywords": [
+    "kernel",
+    "kernel.sh",
+    "browser-automation",
+    "cloud-browsers",
+    "playwright",
+    "typescript",
+    "mcp",
+    "ai-agents"
+  ],
+  "interface": {
+    "displayName": "Kernel (dev)",
+    "shortDescription": "Write code that uses Kernel cloud browsers",
+    "longDescription": "A live-tested Kernel (kernel.sh) knowledge skill for TypeScript projects, debugging, login, audit and site-profiling workflows, hooks that flag deprecated Kernel fields and block API keys written into code, and the Kernel MCP server (sign in with codex mcp login kernel_mcp).",
+    "developerName": "yigitkonur",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Audit this project's Kernel usage"
+    ],
+    "websiteURL": "https://github.com/yigitkonur/plugin-kernel-sh"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.codex-mcp.json",
+  "hooks": "./hooks/codex-hooks.json"
+}

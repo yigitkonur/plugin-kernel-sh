@@ -1,6 +1,6 @@
 #!/bin/sh
 # track.sh -- PostToolUse on Kernel MCP manage_browsers / manage_profiles / manage_browser_pools. Records the browsers
-# this Claude Code session created (create, profile setup, pool acquire) and forgets them on delete/release, so the
+# this Claude Code / Codex session created (create, profile setup, pool acquire) and forgets them on delete/release, so the
 # stop and session-end hooks know what to clean up. Marks a browser kept past the session when the agent tags it
 # keep=after-session (only on the user's request, per the browse skill). Prints nothing. Fail-open.
 case "$0" in */*) KP_PLUGIN_ROOT="${0%/*}/.." ;; *) KP_PLUGIN_ROOT="./.." ;; esac
@@ -16,7 +16,7 @@ main() {
   sd="$(kp_state_dir "$(json_get session_id)")"
   # one jq pass: action, ids and the response text (the MCP returns [{type:"text", text:"<json or prose>"}])
   printf '%s' "$KP_JSON" | jq -r '
-    def txt: [(.tool_response // []) | if type == "array" then .[] else . end | objects | .text // empty] | join("\n");
+    def txt: [(.tool_response // []) | (if type == "array" then .[] elif type == "object" and (.content | type) == "array" then .content[] else . end) | objects | .text // empty] | join("\n");
     def body: (txt | try fromjson catch {});
     [ (.tool_input.action // ""),
       (.tool_input.session_id // ""),

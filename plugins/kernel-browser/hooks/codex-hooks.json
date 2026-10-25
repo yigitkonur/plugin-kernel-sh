@@ -1,0 +1,94 @@
+{
+  "description": "kernel-browser for Codex: primer, browser create guard, browser tracking and cleanup, key guard (no result redaction: Codex ignores updatedMCPToolOutput)",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks/primer.sh\" session --host=codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks/primer.sh\" subagent --host=codex",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^mcp__(codex_apps__)?kernel(_mcp)?__(manage_browsers|manage_browser_pools|manage_profiles)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks/create-guard.sh\" --host=codex",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "^(Edit|Write|MultiEdit|NotebookEdit|apply_patch|Bash)$|^mcp__(codex_apps__)?kernel(_mcp)?__",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks/secret-guard.sh\" --host=codex",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^mcp__(codex_apps__)?kernel(_mcp)?__(manage_browsers|manage_browser_pools|manage_profiles)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks/track.sh\" --host=codex",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks/stop-guard.sh\" stop --host=codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks/stop-guard.sh\" subagent --host=codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks/session-end.sh\" --host=codex",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}
