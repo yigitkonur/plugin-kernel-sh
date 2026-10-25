@@ -2,6 +2,10 @@
 
 Versions are per plugin since 2026-10-22; tags are `<plugin>--v<version>`.
 
+## kernel-dev 2.0.2 - 2026-10-25
+
+- fix: install off by default; adopt the plugin-kit standard (afe37a2)
+
 ## kernel-dev 2.0.1 - 2026-10-25
 
 - ci: per-plugin automatic releases (scripts/release.py --plugin + .github/workflows/release.yml) (a7291f8)
