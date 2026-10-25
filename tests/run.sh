@@ -397,6 +397,117 @@ t_contains "H4 Edit with a key in new_string -> deny" "$(printf '%s' "$EN" | run
 MH="{\"session_id\":\"$(newsid)\",\"cwd\":\"$H3P\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"MultiEdit\",\"tool_input\":{\"file_path\":\"$FILE\",\"edits\":[{\"old_string\":\"a\",\"new_string\":\"const o = { disable_default_proxy: true };\"}]},\"tool_response\":{}}"
 t_contains "H3 MultiEdit adding disable_default_proxy -> finding K001" "$(printf '%s' "$MH" | run_hook edit-tripwire.sh)" ' K001 '
 
+# ---------------------------------------------------------------- Codex
+# Codex runs the same scripts with --host=codex (hooks/codex-hooks.json). Payloads are the shapes captured from codex-cli
+# 0.163 (tests/fixtures/payloads/codex.*): file writes arrive as tool_name apply_patch with the patch text in
+# tool_input.command, a Kernel MCP tool is mcp__kernel_mcp__<tool>, and its result is {"content":[{"type":"text",...}]}.
+echo "--- Codex"
+PB="$R/plugins/kernel-browser"
+cx() { # cx <fixture> <proj> [sid]  (the key goes in as __LINE__)
+  payload "$F/payloads/$1" "$2" "${3:-$SID0}" | sed "s#__LINE__#$KEY#g"
+}
+HC="$P/hooks/codex-hooks.json"; HCB="$PB/hooks/codex-hooks.json"
+if [ "$KP_HAVE_JQ" = 1 ]; then
+  for hj in "$HC" "$HCB"; do
+    jq -e . "$hj" >/dev/null 2>&1 && ok "$(basename "$(dirname "$(dirname "$hj")")") codex-hooks.json parses" || bad "codex-hooks.json parses" "$hj"
+    for c in $(jq -r '.hooks[][].hooks[] | .command' "$hj" | sed -n 's#.*PLUGIN_ROOT}/\(hooks/[A-Za-z0-9_.-]*\).*#\1#p'); do
+      [ -f "$(dirname "$(dirname "$hj")")/$c" ] && ok "codex-hooks.json names existing script $c" || bad "codex-hooks.json script $c" "missing"
+    done
+    t_eq "every codex hook command carries --host=codex" "$(jq -r '[.hooks[][].hooks[] | select(.command | contains("--host=codex") | not)] | length' "$hj")" "0"
+    t_eq "codex hooks are command hooks (Codex skips prompt/agent)" "$(jq -r '[.hooks[][].hooks[] | select(.type != "command")] | length' "$hj")" "0"
+  done
+  t_eq "kernel-dev codex-hooks.json events" "$(jq -r '.hooks | keys | join(",")' "$HC")" "PostToolUse,PreToolUse,SessionStart,SubagentStart"
+  t_eq "kernel-browser codex-hooks.json events" "$(jq -r '.hooks | keys | join(",")' "$HCB")" "PostToolUse,PreToolUse,SessionEnd,SessionStart,Stop,SubagentStart,SubagentStop"
+  t_eq "codex file-write matchers name apply_patch" "$(jq -r '[.. | .matcher? // empty | select(test("Edit")) | select(test("apply_patch") | not)] | length' "$HC" "$HCB" | tr '\n' ' ')" "0 0 "
+fi
+# kernel-dev: primer, patch guard, patch tripwire
+out="$(cx codex.SessionStart.json "$KPROJ" "$(newsid)" | "$KP_SH" "$P/hooks/context.sh" session --host=codex 2>/dev/null)"
+t_contains "codex H1 primer on SessionStart (kernel project)" "$out" 'detected: @onkernel/sdk'
+t_json "codex H1 output is JSON" "$out"
+out="$(cx codex.PreToolUse.apply_patch.json "$G2" "$(newsid)" | "$KP_SH" "$P/hooks/secret-guard.sh" --host=codex 2>/dev/null)"
+t_contains "codex H4 apply_patch with a key literal -> deny" "$out" '"permissionDecision":"deny"'
+t_contains "codex H4 deny names the patched file" "$out" 'Kernel API key literal in src/config.ts.'
+t_json "codex H4 output is JSON" "$out"
+t_empty "codex H4 apply_patch writing a key into a gitignored file -> allow" "$(cx codex.PreToolUse.apply_patch.json "$G1" "$(newsid)" | sed 's#src/config.ts#.env#' | "$KP_SH" "$P/hooks/secret-guard.sh" --host=codex 2>/dev/null)"
+t_empty "codex H4 apply_patch without a key -> silent" "$(cx codex.PreToolUse.apply_patch.json "$G2" "$(newsid)" | sed "s#$KEY#hello#" | "$KP_SH" "$P/hooks/secret-guard.sh" --host=codex 2>/dev/null)"
+t_contains "codex H4 apply_patch with a key, jq absent (sed fallback) -> deny" "$(cx codex.PreToolUse.apply_patch.json "$G2" "$(newsid)" | KP_NO_JQ=1 "$KP_SH" "$P/hooks/secret-guard.sh" --host=codex 2>/dev/null)" '"permissionDecision":"deny"'
+MP="{\"session_id\":\"$(newsid)\",\"cwd\":\"$G2\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"apply_patch\",\"tool_input\":{\"command\":\"*** Begin Patch\\n*** Add File: ok.ts\\n+export const a = 1\\n*** Update File: src/two.ts\\n@@\\n-old\\n+const k = '$KEY'\\n*** End Patch\"}}"
+t_contains "codex H4 patch touching two files: the second one has the key -> deny naming it" "$(printf '%s' "$MP" | "$KP_SH" "$P/hooks/secret-guard.sh" --host=codex 2>/dev/null)" 'literal in src/two.ts.'
+CXP="$W/h3/codex"; stage "$F/detect/pos/package-json" "$CXP" git; mkdir -p "$CXP/src"
+printf "import Kernel from '@onkernel/sdk';\nconst o = { disable_default_proxy: true };\n" > "$CXP/src/new.ts"
+sid="$(newsid)"
+out="$(cx codex.PostToolUse.apply_patch.json "$CXP" "$sid" | "$KP_SH" "$P/hooks/edit-tripwire.sh" --host=codex 2>/dev/null)"
+t_contains "codex H3 apply_patch adding disable_default_proxy -> finding K001" "$out" ' K001 '
+t_contains "codex H3 names the patched file" "$out" 'kernel: src/new.ts: K001'
+t_json "codex H3 output is JSON" "$out"
+t_empty "codex H3 same file again -> silent" "$(cx codex.PostToolUse.apply_patch.json "$CXP" "$sid" | "$KP_SH" "$P/hooks/edit-tripwire.sh" --host=codex 2>/dev/null)"
+printf "import Kernel from '@onkernel/sdk';\nconst p = { proxy_id: 'x' };\nexport const a = 2;\n" > "$CXP/src/legacy.ts"
+LP="{\"session_id\":\"$(newsid)\",\"cwd\":\"$CXP\",\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"apply_patch\",\"tool_input\":{\"command\":\"*** Begin Patch\\n*** Update File: $CXP/src/legacy.ts\\n@@\\n const p = { proxy_id: 'x' };\\n-export const a = 1;\\n+export const a = 2;\\n*** End Patch\"}}"
+t_empty "codex H3 patch that keeps a legacy proxy_id line as context -> silent" "$(printf '%s' "$LP" | "$KP_SH" "$P/hooks/edit-tripwire.sh" --host=codex 2>/dev/null)"
+t_contains "codex H3 jq absent (sed fallback) -> finding K001" "$(cx codex.PostToolUse.apply_patch.json "$CXP" "$(newsid)" | KP_NO_JQ=1 "$KP_SH" "$P/hooks/edit-tripwire.sh" --host=codex 2>/dev/null)" ' K001 '
+t_empty "codex H3 patch of a non-Kernel project -> silent" "$(cx codex.PostToolUse.apply_patch.json "$CXP" "$(newsid)" | sed "s#$CXP#$PL#g" | "$KP_SH" "$P/hooks/edit-tripwire.sh" --host=codex 2>/dev/null)"
+
+# kernel-browser needs jq (every hook parses nested MCP JSON); stub curl records the Kernel API calls
+if [ "$KP_HAVE_JQ" = 1 ]; then
+  run_b() { # run_b <hook-file> [args] < stdin
+    _bh="$1"; shift
+    "$KP_SH" "$PB/hooks/$_bh" "$@" 2>/dev/null
+  }
+  out="$(cx codex.SessionStart.json "$KPROJ" "$(newsid)" | run_b primer.sh session --host=codex)"
+  t_contains "codex kernel-browser primer says the server is kernel_mcp" "$out" 'server kernel_mcp'
+  t_contains "codex kernel-browser primer tells Codex to keep bearer URLs out of output" "$out" 'cannot mask them'
+  t_json "codex kernel-browser primer is JSON" "$out"
+  t_contains "kernel-browser primer on Claude Code keeps its text" "$(payload "$F/payloads/SessionStart.startup.json" "$KPROJ" "$(newsid)" | "$KP_SH" "$PB/hooks/primer.sh" session 2>/dev/null)" 'Kernel MCP tools (manage_browsers'
+  case "$(payload "$F/payloads/SessionStart.startup.json" "$KPROJ" "$(newsid)" | "$KP_SH" "$PB/hooks/primer.sh" session 2>/dev/null)" in *kernel_mcp*|*"cannot mask"*) bad "Claude Code primer is free of Codex wording" "found Codex text" ;; *) ok "Claude Code primer is free of Codex wording" ;; esac
+  out="$(cx codex.PreToolUse.mcp.json "$KPROJ" "$(newsid)" | run_b create-guard.sh --host=codex)"
+  t_contains "codex create-guard denies a create without tag and timeout (mcp__kernel_mcp__ name)" "$out" '"permissionDecision":"deny"'
+  t_contains "codex create-guard says Codex deletes at session end" "$out" 'lets Codex delete'
+  t_contains "create-guard also knows the Kernel connector name mcp__codex_apps__kernel__" "$(cx codex.PreToolUse.mcp.json "$KPROJ" "$(newsid)" | sed 's#mcp__kernel_mcp__#mcp__codex_apps__kernel__#' | run_b create-guard.sh --host=codex)" '"permissionDecision":"deny"'
+  t_empty "create-guard ignores other tools" "$(cx codex.PreToolUse.mcp.json "$KPROJ" "$(newsid)" | sed 's#mcp__kernel_mcp__#mcp__other__#' | run_b create-guard.sh --host=codex)"
+  out="$(cx codex.PreToolUse.apply_patch.json "$G2" "$(newsid)" | run_b secret-guard.sh --host=codex)"
+  t_contains "codex kernel-browser key guard denies a key literal in an apply_patch" "$out" 'Kernel API key literal in src/config.ts.'
+  t_empty "codex kernel-browser key guard: gitignored file -> allow" "$(cx codex.PreToolUse.apply_patch.json "$G1" "$(newsid)" | sed 's#src/config.ts#.env#' | run_b secret-guard.sh --host=codex)"
+  KB_KEYMCP="$(cx codex.PreToolUse.mcp.json "$KPROJ" "$(newsid)" | sed "s#\"context\":\"fixture\"#\"context\":\"$KEY\"#")"
+  t_contains "codex kernel-browser key guard denies a key in Kernel MCP input" "$(printf '%s' "$KB_KEYMCP" | run_b secret-guard.sh --host=codex)" 'carries a Kernel API key literal'
+  # track -> stop -> session end (the Codex result shape {"content":[{"text":...}]})
+  CXS="$(newsid)"
+  cx codex.PostToolUse.mcp.json "$KPROJ" "$CXS" | run_b track.sh --host=codex
+  t_contains "codex track records the browser id from a {content:[{text}]} result" "$(cat "$CLAUDE_PLUGIN_DATA/state/$CXS/browsers" 2>/dev/null)" 'brw123'
+  out="$(cx codex.Stop.json "$KPROJ" "$CXS" | run_b stop-guard.sh stop --host=codex)"
+  t_contains "codex Stop blocks once with the live browser id" "$out" '"decision":"block"'
+  t_contains "codex Stop reason names the browser" "$out" 'brw123'
+  t_empty "codex Stop asks only once per session" "$(cx codex.Stop.json "$KPROJ" "$CXS" | run_b stop-guard.sh stop --host=codex)"
+  t_empty "codex Stop with stop_hook_active -> silent" "$(cx codex.Stop.json "$KPROJ" "$CXS" | sed 's#"stop_hook_active":false#"stop_hook_active":true#' | run_b stop-guard.sh stop --host=codex)"
+  CXS2="$(newsid)"; cx codex.PostToolUse.mcp.json "$KPROJ" "$CXS2" | run_b track.sh --host=codex
+  SB="$W/stubbin"; mkdir -p "$SB"; printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s/curl.log"\ncat >/dev/null\nprintf "\\n200"\n' "$W" > "$SB/curl"; chmod +x "$SB/curl"
+  rm -f "$W/curl.log"
+  out="$(cx codex.SessionEnd.json "$KPROJ" "$CXS2" | PATH="$SB:$PATH" run_b session-end.sh --host=codex)"; rc=$?
+  t_empty "codex SessionEnd without KERNEL_API_KEY -> silent, no API call" "$out"
+  [ ! -s "$W/curl.log" ] && ok "codex SessionEnd without a key makes no API call" || bad "codex SessionEnd without a key" "$(cat "$W/curl.log")"
+  cx codex.SessionEnd.json "$KPROJ" "$CXS2" | KERNEL_API_KEY="$KEY" PATH="$SB:$PATH" run_b session-end.sh --host=codex
+  t_contains "codex SessionEnd with KERNEL_API_KEY deletes the tracked browser" "$(cat "$W/curl.log" 2>/dev/null)" '-X DELETE'
+  t_contains "codex SessionEnd delete targets the tracked id" "$(cat "$W/curl.log" 2>/dev/null)" '/browsers/brw123'
+  # the options of the userConfig come from KERNEL_BROWSER_* env variables on Codex; CLAUDE_PLUGIN_OPTION_* still wins
+  PROBE_B='. "$1/lib/common.sh"; . "$1/lib/browser.sh"; kb_opt "$2" "$3"'
+  t_eq "kb_opt falls back to KERNEL_BROWSER_MAX_TIMEOUT_SECONDS" "$(KERNEL_BROWSER_MAX_TIMEOUT_SECONDS=900 "$KP_SH" -c "$PROBE_B" x "$PB" MAX_TIMEOUT_SECONDS 1800)" "900"
+  t_eq "kb_opt prefers CLAUDE_PLUGIN_OPTION_ over KERNEL_BROWSER_" "$(CLAUDE_PLUGIN_OPTION_MAX_TIMEOUT_SECONDS=300 KERNEL_BROWSER_MAX_TIMEOUT_SECONDS=900 "$KP_SH" -c "$PROBE_B" x "$PB" MAX_TIMEOUT_SECONDS 1800)" "300"
+  t_eq "kb_opt default when neither is set" "$("$KP_SH" -c "$PROBE_B" x "$PB" MAX_TIMEOUT_SECONDS 1800)" "1800"
+  t_eq "KERNEL_BROWSER_API_KEY is not a key source (KERNEL_API_KEY is)" "$(KERNEL_BROWSER_API_KEY=nope "$KP_SH" -c '. "$1/lib/common.sh"; . "$1/lib/browser.sh"; kb_key' x "$PB")" ""
+  t_eq "KERNEL_API_KEY is the key source" "$(KERNEL_API_KEY=abc "$KP_SH" -c '. "$1/lib/common.sh"; . "$1/lib/browser.sh"; kb_key' x "$PB")" "abc"
+  t_contains "create-guard honours KERNEL_BROWSER_MAX_TIMEOUT_SECONDS" "$(cx codex.PreToolUse.mcp.json "$KPROJ" "$(newsid)" | sed 's#"action":"create"#"action":"create","timeout_seconds":1000,"tags":{"cc_session":"11111111-1111-4111-8111-111111111111"}#' | KERNEL_BROWSER_MAX_TIMEOUT_SECONDS=900 run_b create-guard.sh --host=codex)" 'timeout_seconds <= 900'
+  # garbage stdin: exit 0, empty, for every Codex-registered browser hook
+  t_empty "codex kernel-browser primer with empty stdin -> silent" "$(printf '' | "$KP_SH" "$PB/hooks/primer.sh" session --host=codex 2>/dev/null)"
+  for h in "create-guard.sh" "secret-guard.sh" "track.sh" "stop-guard.sh stop" "session-end.sh"; do
+    set -- $h
+    for g in "{{{ not json" "" '[1,2,3]'; do
+      out="$(printf '%s' "$g" | "$KP_SH" "$PB/hooks/$1" $2 --host=codex 2>/dev/null)"; rc=$?
+      if [ $rc -eq 0 ] && [ -z "$out" ]; then ok "codex kernel-browser garbage stdin -> exit 0, empty ($h): $(printf '%s' "$g" | cut -c1-12)"; else bad "codex kernel-browser garbage stdin ($h)" "rc=$rc out=$out"; fi
+    done
+  done
+else
+  skip "codex kernel-browser hooks" "needs jq"
+fi
+
 # ---------------------------------------------------------------- timing
 echo "--- timing"
 # Timings are noisy when the machine is busy: a gate passes if ANY of up to 3 attempts meets it, and every attempt is printed.

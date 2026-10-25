@@ -9,6 +9,8 @@
 #  6 each plugin's plugin.json version == its marketplace entry version (plugin.json is the source of truth)
 #  7 THIRD_PARTY_NOTICES.md ships inside every plugin and matches the root copy; 8 no $N / $ARGUMENTS in SKILL.md bodies
 #  9 the ledger counts quoted in README.md match verified-facts.md; 10 shared hook libs are in sync
+# 11 Codex: every hook script named in hooks/codex-hooks.json exists, and no skill text names ${CLAUDE_PLUGIN_ROOT}
+#    (Codex does not resolve it; manifests, versions and the marketplace are checked by scripts/kit/check-manifests.py)
 set -u; shopt -s nullglob
 cd "$(git rev-parse --show-toplevel)" || exit 2
 fail=0
@@ -64,6 +66,15 @@ for f in "$P/hooks/hooks.json" "$P"/skills/*/SKILL.md "$P"/skills/*/references/*
     [ -e "$P/$p" ] || bad "$f names missing plugin path: \${CLAUDE_PLUGIN_ROOT}/$p"
   done < <(grep -v 'novalidate' "$f" | grep -oE '\$\{CLAUDE_PLUGIN_ROOT\}/[A-Za-z0-9._/-]*[A-Za-z0-9_]' | sed 's#^\${CLAUDE_PLUGIN_ROOT}/##' | sort -u)
 done
+
+# 11 Codex
+if [ -f "$P/hooks/codex-hooks.json" ]; then
+  while IFS= read -r p; do
+    [ -e "$P/$p" ] || bad "$P/hooks/codex-hooks.json names missing script: $p"
+  done < <(grep -oE 'PLUGIN_ROOT\}/[A-Za-z0-9._/-]*[A-Za-z0-9_]' "$P/hooks/codex-hooks.json" | sed 's#^PLUGIN_ROOT}/##' | sort -u)
+  jq -e '[.hooks[][].hooks[] | select(.type != "command")] | length == 0' "$P/hooks/codex-hooks.json" >/dev/null 2>&1 || bad "$P/hooks/codex-hooks.json has a hook that is not a command hook (Codex skips prompt and agent hooks)"
+  if grep -rn 'CLAUDE_PLUGIN_ROOT' "$P"/skills >/dev/null 2>&1; then bad "a skill names CLAUDE_PLUGIN_ROOT, which Codex does not set for skills: $(grep -rn 'CLAUDE_PLUGIN_ROOT' "$P"/skills | head -2 | cut -c1-120)"; fi
+fi
 
 # 6
 V="$(jq -r .version "$P/.claude-plugin/plugin.json")"

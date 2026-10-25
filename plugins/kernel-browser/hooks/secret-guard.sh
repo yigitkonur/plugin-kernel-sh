@@ -1,5 +1,5 @@
 #!/bin/sh
-# secret-guard.sh -- PreToolUse on Edit|Write|MultiEdit|NotebookEdit|Bash and every Kernel MCP tool. Denies a Kernel API
+# secret-guard.sh -- PreToolUse on Edit|Write|MultiEdit|NotebookEdit|Bash (Codex: apply_patch too) and every Kernel MCP tool. Denies a Kernel API
 # key literal in the new text of a file write (a gitignored file is fine) or in a Bash command, and any Kernel API key
 # or 1Password service-account token (ops_...) in a Kernel MCP tool input (MCP inputs land in the transcript). A speed
 # bump, not a vault: a key split over lines is not seen. Fail-open: only a positive match can deny.
@@ -31,15 +31,19 @@ main() {
   tmp="$(mktemp "${TMPDIR:-/tmp}/kb-h4.XXXXXX")" || return 0
   trap 'rm -f "$tmp"' EXIT
   kp_parse_tool "$tmp" || return 0
-  case "$KP_TOOL" in Edit|Write|MultiEdit|NotebookEdit|Bash) ;; *) return 0 ;; esac
-  sed '1,4d' "$tmp" | grep -E -q "$KP_KEY_RE" || return 0
-  if [ "$KP_TOOL" = Bash ]; then
-    target="this Bash command"
+  case "$KP_TOOL" in Edit|Write|MultiEdit|NotebookEdit|Bash|apply_patch) ;; *) return 0 ;; esac
+  if [ "$KP_TOOL" = apply_patch ]; then   # Codex: the patch text is tool_input.command; the first file that gets a key decides
+    target="$(kp_patch_key_target "$(json_get tool_input.command)" "$KP_CWD")" || return 0
   else
-    [ -n "$KP_FILE" ] || return 0
-    case "$KP_FILE" in /*) f="$KP_FILE" ;; *) f="$KP_CWD/$KP_FILE" ;; esac
-    kp_env_ok "$f" && return 0
-    target="$(kp_relpath "$KP_CWD" "$f")"
+    sed '1,4d' "$tmp" | grep -E -q "$KP_KEY_RE" || return 0
+    if [ "$KP_TOOL" = Bash ]; then
+      target="this Bash command"
+    else
+      [ -n "$KP_FILE" ] || return 0
+      case "$KP_FILE" in /*) f="$KP_FILE" ;; *) f="$KP_CWD/$KP_FILE" ;; esac
+      kp_env_ok "$f" && return 0
+      target="$(kp_relpath "$KP_CWD" "$f")"
+    fi
   fi
   deny "Kernel API key literal in $target. Read it from KERNEL_API_KEY (env or a gitignored .env); never commit or echo keys."
 }

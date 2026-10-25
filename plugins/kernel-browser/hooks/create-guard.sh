@@ -37,7 +37,7 @@ main() {
     esac
   fi
   [ -n "$why" ] || return 0
-  reason="kernel-browser: resend this $tool $action and $why. timeout_seconds counts idle time only (idle browsers cost nothing), and the session tag lets Claude Code delete what this session created when it ends."
+  reason="kernel-browser: resend this $tool $action and $why. timeout_seconds counts idle time only (idle browsers cost nothing), and the session tag lets $KP_HOST_NAME delete what this session created when it ends."
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' \
     "$(printf '%s' "$reason" | json_escape)"
 }

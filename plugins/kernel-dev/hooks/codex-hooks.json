@@ -1,0 +1,51 @@
+{
+  "description": "Kernel for Codex: project primer, stale-identifier tripwire, API-key guard",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks/context.sh\" session --host=codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks/context.sh\" subagent --host=codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(Edit|Write|MultiEdit|NotebookEdit|apply_patch|Bash)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks/secret-guard.sh\" --host=codex",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(Edit|Write|MultiEdit|NotebookEdit|apply_patch)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${PLUGIN_ROOT}/hooks/edit-tripwire.sh\" --host=codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

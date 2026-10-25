@@ -1,5 +1,5 @@
 #!/bin/sh
-# edit-tripwire.sh -- H3 (PostToolUse on Edit|Write|MultiEdit|NotebookEdit): flag deprecated Kernel identifiers the
+# edit-tripwire.sh -- H3 (PostToolUse on Edit|Write|MultiEdit|NotebookEdit, and apply_patch in Codex): flag deprecated Kernel identifiers the
 # agent just wrote. A rule fires only if more lines of the NEW text match it than lines of the text it replaced, AND
 # the file on disk matches; once per
 # (session, file, rule); at most 3 findings; <= 600 chars; only in detected Kernel projects whose file carries a marker;
@@ -11,7 +11,7 @@ kp_off && exit 0
 # stdin = kp_tool_stream old: 4 metadata lines, then the new text, a separator line and the replaced text (consumed by the rules awk)
 h3_body() {
   IFS= read -r sid; IFS= read -r cwd; IFS= read -r tool; IFS= read -r fp
-  case "$tool" in Edit|Write|MultiEdit|NotebookEdit) ;; *) return 0 ;; esac
+  case "$tool" in Edit|Write|MultiEdit|NotebookEdit|apply_patch) ;; *) return 0 ;; esac
   [ -n "$fp" ] || return 0
   case "$fp" in /*) f="$fp" ;; *) f="$cwd/$fp" ;; esac
   [ -f "$f" ] || return 0
@@ -51,10 +51,26 @@ $m"; else break; fi
   kp_emit PostToolUse "$text"
 }
 
+# Codex apply_patch: one patch can touch several files; each file goes through h3_body as if it were one Edit, and the
+# first file with a finding is reported (the hook prints one JSON object).
+h3_patch() {
+  _sid="$(json_get session_id)"; _cwd="$(json_get cwd)"
+  _pd="$(mktemp -d "${TMPDIR:-/tmp}/kp-h3.XXXXXX")" || return 0
+  _n="$(json_get tool_input.command | kp_patch_explode "$_pd")"
+  _i=1
+  while [ "$_i" -le "${_n:-0}" ]; do
+    IFS= read -r _p < "$_pd/$_i.path"
+    _o="$({ printf '%s\n%s\napply_patch\n%s\n' "$_sid" "$_cwd" "$_p"; cat "$_pd/$_i.new"; printf '\001KP-OLD\001\n'; cat "$_pd/$_i.old"; } | h3_body)"
+    if [ -n "$_o" ]; then printf '%s\n' "$_o"; break; fi
+    _i=$((_i + 1))
+  done
+  rm -rf "$_pd"
+}
+
 main() {
   kp_read_stdin
   [ -n "$KP_JSON" ] || return 0
-  kp_tool_stream old | h3_body
+  if [ "$(json_get tool_name)" = apply_patch ]; then h3_patch; else kp_tool_stream old | h3_body; fi
 }
 
 out="$(main 2>/dev/null)" || out=""

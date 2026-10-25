@@ -3,8 +3,15 @@
 # Contract: helpers never abort the caller; hooks wrap everything so any failure ends in exit 0 / empty stdout.
 #
 # Env: KERNEL_PLUGIN_HOOKS=off  silences every hook
-#      CLAUDE_PLUGIN_DATA       state root parent (state lives in $CLAUDE_PLUGIN_DATA/state)
+#      CLAUDE_PLUGIN_DATA       state root parent (state lives in $CLAUDE_PLUGIN_DATA/state); Codex sets it too, and PLUGIN_DATA
 #      KP_NO_JQ=1               test switch: ignore jq and use the sed fallback
+#      --host=codex             argument of the hook commands in hooks/codex-hooks.json (or KP_HOST=codex): Codex wording
+
+# Host: Claude Code passes nothing; hooks/codex-hooks.json appends --host=codex to every command. Sourced files see the
+# caller's arguments, so this works for hooks and for bin/kernel-plugin alike.
+KP_HOST="${KP_HOST:-claude}"
+for _kp_a in "$@"; do [ "$_kp_a" = "--host=codex" ] && KP_HOST=codex; done
+if [ "$KP_HOST" = codex ]; then KP_HOST_NAME="Codex"; else KP_HOST_NAME="Claude Code"; fi
 
 KP_TAB="$(printf '\t')"
 KP_CR="$(printf '\r')"
@@ -60,7 +67,7 @@ kp_emit() {
 # fails silently and the hooks carry on without state.
 kp_state_root() {
   _kp_shared=0
-  if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then _kp_sr="$CLAUDE_PLUGIN_DATA/state"   # Claude Code's own per-user plugin data
+  if [ -n "${CLAUDE_PLUGIN_DATA:-${PLUGIN_DATA:-}}" ]; then _kp_sr="${CLAUDE_PLUGIN_DATA:-$PLUGIN_DATA}/state"   # the host's own per-user plugin data (Claude Code; Codex sets both names)
   else _kp_sr="${TMPDIR:-/tmp}/kernel-plugin-state-${USER:-$(id -u)}"; _kp_shared=1; fi
   [ -d "$_kp_sr" ] || mkdir -p -m 700 "$_kp_sr" 2>/dev/null
   if [ -d "$_kp_sr" ]; then
@@ -162,6 +169,41 @@ kp_tool_stream() {
   fi
 }
 
+
+# ---- Codex apply_patch ---------------------------------------------------------------------------------
+# Codex writes files with the tool `apply_patch`; the patch text is tool_input.command:
+#   *** Begin Patch / *** Add File: <path> / *** Update File: <path> [/ *** Move to: <path>] / *** Delete File: <path>
+#   @@ hunk header, then lines starting "+" (added), "-" (removed) or " " (context) / *** End Patch
+# kp_patch_explode <dir>: stdin = patch text. Writes <dir>/<n>.path, <n>.new (added lines) and <n>.old (removed lines)
+# for each added or updated file (n = 1, 2, ...) and prints n. Deleted files are skipped.
+kp_patch_explode() {
+  awk -v d="$1" '
+    /^\*\*\* (Add|Update) File: / { if (n) { close(d "/" n ".new"); close(d "/" n ".old") }; n++; p = $0; sub(/^\*\*\* (Add|Update) File: /, "", p)
+      print p > (d "/" n ".path"); close(d "/" n ".path"); printf "" > (d "/" n ".new"); printf "" > (d "/" n ".old"); cur = 1; next }
+    /^\*\*\* Move to: / { if (cur) { p = $0; sub(/^\*\*\* Move to: /, "", p); print p > (d "/" n ".path"); close(d "/" n ".path") } next }
+    /^\*\*\* / { cur = 0; next }
+    cur && /^\+/ { print substr($0, 2) >> (d "/" n ".new"); next }
+    cur && /^-/ { print substr($0, 2) >> (d "/" n ".old"); next }
+    END { print n + 0 }'
+}
+
+# kp_patch_key_target <patch-text> <cwd>: prints the (relative) path of the first patched file whose added lines carry a
+# Kernel API key literal ($KP_KEY_RE) and that is not a gitignored or .env file; returns 1 when there is none.
+kp_patch_key_target() {
+  _kp_pd="$(mktemp -d "${TMPDIR:-/tmp}/kp-patch.XXXXXX")" || return 1
+  _kp_n="$(printf '%s\n' "$1" | kp_patch_explode "$_kp_pd")"
+  _kp_i=1; _kp_hit=1
+  while [ "$_kp_i" -le "${_kp_n:-0}" ]; do
+    if grep -E -q "$KP_KEY_RE" "$_kp_pd/$_kp_i.new" 2>/dev/null; then
+      IFS= read -r _kp_p < "$_kp_pd/$_kp_i.path"
+      case "$_kp_p" in /*) _kp_f="$_kp_p" ;; *) _kp_f="$2/$_kp_p" ;; esac
+      if ! kp_env_ok "$_kp_f"; then printf '%s' "$(kp_relpath "$2" "$_kp_f")"; _kp_hit=0; break; fi
+    fi
+    _kp_i=$((_kp_i + 1))
+  done
+  rm -rf "$_kp_pd"
+  return $_kp_hit
+}
 
 # kp_parse_tool <outfile>: kp_tool_stream into <outfile>; sets KP_SID KP_CWD KP_TOOL KP_FILE
 kp_parse_tool() {
