@@ -72,6 +72,10 @@ jobs:
           $info
           EOF
             [ -n "$tag" ] && [ -n "$apply" ] || continue
+            if [ -f scripts/release-bump.sh ]; then
+              version=$(printf '%s' "$out" | python3 -c "import json,sys;print(json.load(sys.stdin)['version'])")
+              sh scripts/release-bump.sh "$version"
+            fi
             git add -A
             git diff --cached --quiet || git commit -m "chore(release): $tag [skip ci]"
             git tag -a "$tag" -m "$tag"

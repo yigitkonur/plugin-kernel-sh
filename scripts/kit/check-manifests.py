@@ -99,9 +99,13 @@ def main(argv):
         elif pj.get("defaultEnabled") is not False:
             fail('%s: plugin.json must set "defaultEnabled": false (installed globally, off, switched on per project)' % rel)
         # Codex
-        cj_path = os.path.join(rel, ".codex-plugin/plugin.json")
+        ce = next((x for x in cmk.get("plugins", []) if x.get("name") == name), None)
+        source = (ce or {}).get("source") or {}
+        csrc = source.get("path")
+        croot = os.path.normpath(os.path.join(root, csrc)) if isinstance(csrc, str) else proot
+        cj_path = os.path.join(os.path.relpath(croot, root), ".codex-plugin/plugin.json")
         has_codex_pj = os.path.exists(os.path.join(root, cj_path))
-        listed = any(x.get("name") == name for x in cmk.get("plugins", []))
+        listed = ce is not None
         if has_codex_pj != listed:
             fail("%s: Codex packaging is half there (.codex-plugin/plugin.json: %s, listed in .agents/plugins/marketplace.json: %s). A plugin without a Codex port has neither." % (name, has_codex_pj, listed))
         if has_codex_pj:
@@ -113,7 +117,7 @@ def main(argv):
                 fail("%s: codex version %s != claude version %s" % (cj_path, cj.get("version"), ver))
             for k in ("skills", "mcpServers", "hooks"):
                 v = cj.get(k)
-                if isinstance(v, str) and (not v.startswith("./") or not os.path.exists(os.path.join(proot, v))):
+                if isinstance(v, str) and (not v.startswith("./") or not os.path.exists(os.path.join(croot, v))):
                     fail("%s: %s path %r must start with ./ and exist" % (cj_path, k, v))
             ce = next((x for x in cmk.get("plugins", []) if x.get("name") == name), None)
             if not ce:
@@ -123,8 +127,9 @@ def main(argv):
                 if pol.get("installation") != "AVAILABLE" or not pol.get("authentication") or not ce.get("category"):
                     fail("%s: codex marketplace entry needs policy.installation AVAILABLE, policy.authentication and category" % name)
                 s = ce.get("source") or {}
-                if s.get("source") != "local" or os.path.normpath(os.path.join(root, s.get("path", "x"))) != proot:
-                    fail("%s: codex marketplace source must be local and point at %s (found %s)" % (name, src, s))
+                if (s.get("source") != "local" or not isinstance(csrc, str) or not csrc.startswith("./")
+                        or os.path.commonpath([os.path.abspath(root), os.path.abspath(croot)]) != os.path.abspath(root)):
+                    fail("%s: codex marketplace source must be a local ./ path inside the repo (found %s)" % (name, s))
     if has_codex_mk and cmk.get("name") != mk.get("name"):
         fail("codex marketplace name %r != claude marketplace name %r" % (cmk.get("name"), mk.get("name")))
     if not codex_seen:
