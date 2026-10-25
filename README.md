@@ -9,40 +9,71 @@ two claude code plugins for [kernel](https://kernel.sh) cloud browsers. pick the
 
 the facts in here were checked against `@onkernel/sdk`, the `kernel` cli, the kernel mcp server's source and live runs on a real account (receipts: [verified-facts.md](verified-facts.md)). anything that wasn't run live says "(unverified)" or "(untested)" right in the text.
 
+<!-- kit:install:start -->
 ## install
 
-one command each, from your terminal:
+Every plugin of ours is installed **once, globally, and off**, then **turned on per project**. Nothing runs and no tokens are spent in chats that don't switch it on. It works the same in Claude Code and Codex (this one is Claude Code only for now: no Codex port yet).
 
-```sh
-claude plugin install kernel-browser --marketplace yigitkonur/plugin-kernel-sh
-claude plugin install kernel-dev --marketplace yigitkonur/plugin-kernel-sh
-```
+### 1. install them globally
 
-each adds the `plugin-kernel-sh` marketplace (user scope) if it isn't there yet and installs that plugin. restart claude code afterwards so hooks and skills load. `kernel-browser` will say "6 userConfig options not yet set": they're all optional, see below.
-
-prefer the classic two-step, or you're already in a session?
+**Claude Code**
 
 ```sh
 claude plugin marketplace add yigitkonur/plugin-kernel-sh
-claude plugin install kernel-browser@plugin-kernel-sh
+claude plugin install kernel-dev@plugin-kernel-sh -s user          # stays off: defaultEnabled is false in the manifest
+claude plugin install kernel-browser@plugin-kernel-sh -s user
 ```
 
-```text
-/plugin marketplace add yigitkonur/plugin-kernel-sh
-/plugin install kernel-browser@plugin-kernel-sh
-```
-
-for a whole team, add `--scope project` to both commands and commit `.claude/settings.json`.
-
-check what landed, stay fresh, or bail:
+All our plugins, both hosts, plus the `plugin` command and the 6-hourly update job, in one line:
 
 ```sh
-claude plugin details kernel-browser
-claude plugin marketplace update plugin-kernel-sh && claude plugin update kernel-browser@plugin-kernel-sh
-claude plugin uninstall kernel-browser@plugin-kernel-sh
+curl -fsSL https://raw.githubusercontent.com/yigitkonur/plugin-kit/main/install.sh | sh -s -- --all
 ```
 
-**coming from 1.x?** the old plugin was called `kernel`. it's now `kernel-dev` (2.0.0), same content, skills under `/kernel-dev:`. after a marketplace update the old one shows "failed to load" in `claude plugin list`; run `claude plugin uninstall kernel@plugin-kernel-sh`, then `claude plugin install kernel-dev@plugin-kernel-sh`.
+### 2. turn them on in a project
+
+```sh
+cd your-project
+plugin on kernel-dev    # Claude Code, this folder only
+plugin off kernel-dev   # undo
+plugin                  # or pick from a list (TUI)
+```
+
+By hand, without the `plugin` command:
+
+```sh
+claude plugin enable kernel-dev@plugin-kernel-sh --scope project      # undo: claude plugin disable kernel-dev@plugin-kernel-sh --scope project
+claude plugin enable kernel-browser@plugin-kernel-sh --scope project      # undo: claude plugin disable kernel-browser@plugin-kernel-sh --scope project
+```
+
+Restart `claude` in that folder afterwards.
+
+### 3. updates
+
+A plugin updates only when its `version` changes, and this repo's `release` workflow bumps it on every shipped change. Machines pick it up with `plugin update`, or by themselves with the 6-hourly job (`plugin autoupdate install`). By hand:
+
+```sh
+claude plugin marketplace update plugin-kernel-sh && claude plugin update kernel-dev@plugin-kernel-sh
+```
+
+No GitHub SSH key on the machine? `export CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` (`plugin install` sets it in Claude's settings for you).
+
+### 4. uninstall
+
+```sh
+claude plugin uninstall kernel-dev@plugin-kernel-sh -s user
+claude plugin uninstall kernel-browser@plugin-kernel-sh -s user
+claude plugin marketplace remove plugin-kernel-sh
+```
+<!-- kit:install:end -->
+
+### coming from 1.x
+
+the old plugin was called `kernel`. it's now `kernel-dev` (2.0.0), same content, skills under `/kernel-dev:`. after a marketplace update the old one shows "failed to load" in `claude plugin list`; run `claude plugin uninstall kernel@plugin-kernel-sh`, then install `kernel-dev` as described above.
+
+### two plugins, one marketplace
+
+the marketplace `plugin-kernel-sh` carries both `kernel-browser` and `kernel-dev`; install and switch on whichever you need, or both. `kernel-browser` will say "6 userConfig options not yet set" once installed: they're all optional, see its setup below. these plugins are claude code only; there is no codex package.
 
 ### what you need
 
@@ -155,14 +186,14 @@ plugins/kernel-dev/               skills/ hooks/ lib/ rules/ bin/ .mcp.json
 shared/lib/                       hook library copied into both plugins (scripts/sync-shared.sh)
 tests/                            kernel-dev hook, detection and rule tests (sh tests/run.sh)
 lab/                              maintainer smoke tests against the live api
-scripts/                          validate, snippet type-check, link check, freshness, secret scan, version sync
+scripts/                          validate, release gate, snippet type-check, link check, freshness, secret scan, kit/ (vendored from plugin-kit)
 verified-facts.md                 evidence ledger from live runs
 MCP-FINDINGS.md                   issues found in kernel's mcp server
 DECISIONS.md                      why it's built this way
 CHANGELOG.md                      what changed per release
 ```
 
-maintainers: `sh tests/run.sh --all-shells`, `scripts/validate.sh`, `scripts/secret-scan.sh --tree`, and `cd lab && npm install && node ../scripts/typecheck-snippets.mjs`. versions live in each `plugin.json`; bump with `scripts/sync-version.sh <plugin> <x.y.z>`. ci runs the tests on ubuntu and macos, and a weekly job opens an issue when kernel ships something that needs re-verifying.
+maintainers: `sh tests/run.sh --all-shells`, `scripts/validate.sh`, `scripts/secret-scan.sh --tree`, and `cd lab && npm install && node ../scripts/typecheck-snippets.mjs`. versions live in each `plugin.json` and are bumped by the release workflow on `main`, never by hand (see [AGENTS.md](AGENTS.md)). ci runs the tests on ubuntu and macos, and a weekly job opens an issue when kernel ships something that needs re-verifying.
 
 ## license
 

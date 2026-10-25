@@ -10,7 +10,7 @@ argument-hint: "<domain>"
 
 Goal: a Kernel profile that opens signed in to one site, a name the user can reuse, and no secret in the transcript.
 
-The argument is the text after the skill name (or the line starting `ARGUMENTS:`): a domain such as `github.com`. If missing, ask and stop. Lower-case it and check it is a hostname (`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`, at most 253 characters); otherwise say so and stop. Profile and credential names you choose: `^[A-Za-z0-9._-]{1,64}$`.
+The argument is the text after the skill name (or the line starting `ARGUMENTS:`): a domain such as `github.com`. If missing, ask and stop. Lower-case it and check it is a hostname (`^[a-z0-9]{1}([a-z0-9-]*[a-z0-9]{1})?(\.[a-z0-9]{1}([a-z0-9-]*[a-z0-9]{1})?)+$`, at most 253 characters); otherwise say so and stop. Profile and credential names you choose: `^[A-Za-z0-9._-]{1,64}$`.
 
 Tools are the Kernel MCP tools; give each call a one-line `context`. Pass `project` when the kernel-browser note at session start names one (the plugin's `project` option) or the user named one.
 

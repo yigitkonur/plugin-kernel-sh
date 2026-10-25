@@ -1,6 +1,7 @@
 {
   "name": "kernel-browser",
   "version": "1.0.1",
+  "defaultEnabled": false,
   "description": "Use Kernel (kernel.sh) cloud browsers as Claude Code's browser: saved logins in profiles, 1Password and hosted sign-in, safe parallel browsing, and hooks that tag, track and delete the browsers a session creates.",
   "author": {
     "name": "yigitkonur",
