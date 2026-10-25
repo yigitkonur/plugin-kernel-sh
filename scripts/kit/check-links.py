@@ -30,7 +30,7 @@ def main(argv):
                 in_fence = not in_fence
             if in_fence or "nolink" in line:
                 continue
-            for target in LINK.findall(line):
+            for target in LINK.findall(re.sub(r"`[^`]*`", "", line)):   # inline code is not a link
                 if re.match(r"^(https?:|mailto:|#|tel:|data:)", target):
                     continue
                 path = target.split("#")[0].split("?")[0]
