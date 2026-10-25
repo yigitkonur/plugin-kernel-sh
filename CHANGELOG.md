@@ -2,6 +2,11 @@
 
 Versions are per plugin since 2026-10-22; tags are `<plugin>--v<version>`.
 
+## kernel-dev 2.0.1 - 2026-10-25
+
+- ci: per-plugin automatic releases (scripts/release.py --plugin + .github/workflows/release.yml) (a7291f8)
+- kernel-browser 1.0.1: the project option steers creates, not only cleanup (#8) (381db74)
+
 ## kernel-browser 1.0.1 - 2026-10-22
 
 - The `project` option now steers where browsers are created, not only where cleanup looks: the primer tells the agent to pass it on every Kernel call, and the create guard sends back a browser create, pool create or acquire, or profile setup aimed at another project. Before, browsers could land in the connection's default project while cleanup looked in the configured one and silently did nothing.

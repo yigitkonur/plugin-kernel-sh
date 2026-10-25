@@ -1,6 +1,6 @@
 {
   "name": "kernel-dev",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Steering for Kernel (kernel.sh) cloud browsers in TypeScript projects: a live-tested knowledge skill, debugging and login workflows, hooks that catch deprecated fields and leaked API keys, and the Kernel MCP server.",
   "author": {
     "name": "yigitkonur",
