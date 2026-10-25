@@ -5,8 +5,7 @@
     "url": "https://github.com/yigitkonur"
   },
   "metadata": {
-    "description": "Claude Code plugin for Kernel (kernel.sh) cloud browsers in TypeScript.",
-    "version": "2.0.0"
+    "description": "Claude Code plugin for Kernel (kernel.sh) cloud browsers in TypeScript."
   },
   "plugins": [
     {
