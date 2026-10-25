@@ -1,0 +1,86 @@
+name: release
+# Each plugin in this marketplace has its own version (plugins/<name>/.claude-plugin/plugin.json) and tags (<name>--v<x.y.z>).
+# After ci is green on main, scripts/release.py --plugin <name> decides per plugin, from the conventional-commit subjects of the
+# commits that touch that plugin's folder (feat -> minor, fix/perf -> patch, `!` or BREAKING CHANGE -> major, minor while < 1.0.0;
+# docs, ci, chore, test, style, build and refactor -> none): it bumps the plugin's plugin.json and its own marketplace entry and
+# adds "## <name> <x.y.z> - date" to CHANGELOG.md. Then this job validates the whole tree, pushes the release commits and tags,
+# and publishes one GitHub release per plugin. A human who already bumped a plugin is respected (that exact version is released).
+# By hand: Actions > release > Run workflow, level patch|minor|major (applies to every plugin; use "auto" for the normal decision).
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      level:
+        description: "auto, patch, minor or major"
+        default: auto
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+      - name: A newer push owns the next release
+        id: fresh
+        run: |
+          git fetch --quiet origin main
+          if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]; then echo "fresh=true" >> "$GITHUB_OUTPUT"; else echo "this commit is no longer the tip of main; the run for the newer push will release"; fi
+      - uses: actions/setup-python@v5
+        if: steps.fresh.outputs.fresh == 'true'
+        with:
+          python-version: "3.12"
+      - name: Decide and write each plugin's next version
+        id: bump
+        if: steps.fresh.outputs.fresh == 'true'
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          : > "$RUNNER_TEMP/tags"
+          for name in $(python3 -c "import json;print(' '.join(p['name'] for p in json.load(open('.claude-plugin/marketplace.json'))['plugins']))"); do
+            out=$(python3 scripts/release.py --plugin "$name" --apply --level "${{ inputs.level || 'auto' }}" --notes-out "$RUNNER_TEMP/notes-$name.md")
+            echo "$out"
+            tag=$(printf '%s' "$out" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d.get('tag','') if d.get('release') else '')")
+            [ -n "$tag" ] || continue
+            git add -A
+            git diff --cached --quiet || git commit -m "chore(release): $tag [skip ci]"
+            git tag -a "$tag" -m "$tag"
+            echo "$name $tag" >> "$RUNNER_TEMP/tags"
+          done
+          if [ -s "$RUNNER_TEMP/tags" ]; then echo "released=true" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/setup-node@v4
+        if: steps.bump.outputs.released == 'true'
+        with:
+          node-version: "22"
+      - name: Validate the bumped tree
+        if: steps.bump.outputs.released == 'true'
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          scripts/validate.sh
+      - name: Push, then publish one GitHub release per plugin
+        if: steps.bump.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # No rebase: if main moved while this ran, the versions no longer describe it; the queued run for that push releases.
+          git push origin HEAD:main || { echo "::error::main moved during the release; the run for that push will release"; exit 1; }
+          while read -r name tag; do
+            git push origin "refs/tags/$tag"
+            version="${tag#*--v}"
+            { printf '**install:** `claude plugin install %s --marketplace %s`\n\n' "$name" "${{ github.repository }}"; cat "$RUNNER_TEMP/notes-$name.md"; } > "$RUNNER_TEMP/release-$name.md"
+            gh release create "$tag" --title "$name $version" --notes-file "$RUNNER_TEMP/release-$name.md" --verify-tag
+          done < "$RUNNER_TEMP/tags"
